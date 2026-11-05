@@ -1,6 +1,6 @@
 # 🔥 Fire Detection Studio — AI Fire & Smoke Detection Workbench
 
-Hệ thống Web Demo thử nghiệm mô hình thị giác máy tính **YOLO26n-P2** kết hợp module chú ý không gian **Spatial-Relational Co-Attention (SRC)** theo thời gian thực.
+Hệ thống Web Demo thử nghiệm mô hình thị giác máy tính theo thời gian thực.
 
 ## 📂 Thư mục Dự án Chính
 
