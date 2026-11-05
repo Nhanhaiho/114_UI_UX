@@ -17,13 +17,13 @@ Toàn bộ mã nguồn, dữ liệu trọng số và tài liệu của dự án 
 
 ### 1. Khởi động Backend (FastAPI - Cổng 8000)
 ```powershell
-cd C:\fire_smoke_web\fire-detection-demo\backend
+cd \fire_smoke_web\fire-detection-demo\backend
 python run.py
 ```
 
 ### 2. Khởi động Frontend (React + Vite - Cổng 5173)
 ```powershell
-cd C:\fire_smoke_web\fire-detection-demo\frontend
+cd \fire_smoke_web\fire-detection-demo\frontend
 npm run preview -- --port 5173
 ```
 
