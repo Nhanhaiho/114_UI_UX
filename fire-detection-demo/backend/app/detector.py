@@ -103,7 +103,9 @@ class YoloSRCDetector(DetectorAdapter):
             else:
                 self._classes = {0: "fire", 1: "smoke"}
 
-            self._model_name = f"YOLO26n-P2-SRC ({self._model_path.name})"
+            has_src = any("SpatialRelationalCoAttention" in str(type(m)) for m in self._model.model.modules()) if hasattr(self._model, 'model') else False
+            arch_tag = "YOLO26n-P2+SRC" if has_src else "YOLO26n"
+            self._model_name = f"{arch_tag} ({self._model_path.name})"
             self._is_ready = True
             self._error_message = None
             logger.info(f"Nạp mô hình thành công! Danh sách lớp: {self._classes}")

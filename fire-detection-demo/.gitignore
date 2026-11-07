@@ -1,0 +1,61 @@
+# ==========================================
+# Mô hình AI Checkpoints (Weights)
+# ==========================================
+*.pt
+*.pth
+*.bin
+*.onnx
+*.engine
+*.tflite
+*.safetensors
+backend/weights/*.pt
+backend/model_code/*.pt
+
+# Ngoại lệ: Giữ lại các tệp hướng dẫn README.md trong weights và model_code
+!backend/weights/README.md
+!backend/model_code/README.md
+
+# ==========================================
+# Python & Virtual Environments
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/__pycache__/
+backend/app/__pycache__/
+
+# Môi trường ảo (Virtual Environments)
+.venv/
+venv/
+env/
+
+# ==========================================
+# Cấu hình Môi trường Cục bộ & Bảo mật
+# ==========================================
+backend/.env
+.env
+.env.local
+!.env.example
+!backend/.env.example
+
+# ==========================================
+# Node.js & Frontend Bundler
+# ==========================================
+frontend/node_modules/
+node_modules/
+frontend/dist/
+dist/
+dist-ssr/
+*.log
+
+# ==========================================
+# Editor, IDE & Hệ điều hành
+# ==========================================
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
