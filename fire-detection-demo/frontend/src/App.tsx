@@ -17,7 +17,7 @@ import type {
 
 export function App() {
   // 1. Trạng thái Backend & Mô hình
-  const { health, modelStatus, isConnected, isChecking } = useBackendStatus();
+  const { health, modelStatus, isConnected, isChecking, refreshStatus } = useBackendStatus();
   const [isMockMode, setIsMockMode] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
@@ -600,6 +600,7 @@ export function App() {
           highlightedIndex={highlightedIndex}
           onHoverDetection={setHighlightedIndex}
           isVideoOrCamera={sourceType === 'video' || sourceType === 'camera'}
+          modelStatus={modelStatus}
         />
       </main>
 
@@ -617,6 +618,7 @@ export function App() {
         onChangeTolerance={setTimestampToleranceMs}
         showLabels={showLabels}
         onToggleShowLabels={() => setShowLabels((prev) => !prev)}
+        onRefreshStatus={refreshStatus}
       />
     </div>
   );

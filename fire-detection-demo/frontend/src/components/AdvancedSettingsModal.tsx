@@ -1,6 +1,7 @@
-import React from 'react';
-import { X, Cpu, Server, Sliders, CheckCircle, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Cpu, Server, Sliders, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
 import type { ModelStatus, BackendHealth } from '../types';
+import { getAvailableModels, switchModel, type ModelListItem } from '../services/api';
 
 interface AdvancedSettingsModalProps {
   isOpen: boolean;
@@ -15,6 +16,7 @@ interface AdvancedSettingsModalProps {
   onChangeTolerance: (ms: number) => void;
   showLabels: boolean;
   onToggleShowLabels: () => void;
+  onRefreshStatus?: () => void;
 }
 
 export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
@@ -30,7 +32,35 @@ export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
   onChangeTolerance,
   showLabels,
   onToggleShowLabels,
+  onRefreshStatus,
 }) => {
+  const [modelList, setModelList] = useState<ModelListItem[]>([]);
+  const [isSwitching, setIsSwitching] = useState<boolean>(false);
+  const [switchFeedback, setSwitchFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      void getAvailableModels()
+        .then((res) => setModelList(res.models))
+        .catch(() => {});
+    }
+  }, [isOpen]);
+
+  const handleSelectModel = async (modelPath: string) => {
+    setIsSwitching(true);
+    setSwitchFeedback('Đang nạp mô hình vào bộ nhớ...');
+    try {
+      await switchModel(modelPath);
+      setSwitchFeedback('Chuyển đổi mô hình thành công!');
+      if (onRefreshStatus) onRefreshStatus();
+      setTimeout(() => setSwitchFeedback(null), 3000);
+    } catch (err: any) {
+      setSwitchFeedback(`Lỗi: ${err.message || 'Không thể đổi model'}`);
+    } finally {
+      setIsSwitching(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -85,6 +115,67 @@ export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
                 <span className="info-val font-mono">{health?.uptime_seconds ? `${Math.round(health.uptime_seconds)}s` : '--'}</span>
               </div>
             </div>
+
+            {/* Chuyển đổi mô hình nhanh */}
+            <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: '#334155' }}>
+                  Đổi sang checkpoint khác ({modelList.length} weights có sẵn):
+                </span>
+                {isSwitching && (
+                  <span style={{ fontSize: '12px', color: '#f97316', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <RefreshCw size={12} className="animate-spin" /> Đang nạp...
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '6px' }}>
+                {modelList.map((m) => {
+                  const isCurrent = modelStatus?.model_path?.toLowerCase().includes(m.filename.toLowerCase());
+                  return (
+                    <button
+                      key={m.filename}
+                      type="button"
+                      disabled={isSwitching || isCurrent}
+                      onClick={() => handleSelectModel(m.path)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '7px 12px',
+                        borderRadius: '6px',
+                        border: isCurrent ? '1.5px solid #10b981' : '1px solid #cbd5e1',
+                        background: isCurrent ? '#ecfdf5' : '#ffffff',
+                        cursor: isCurrent ? 'default' : 'pointer',
+                        textAlign: 'left',
+                        fontSize: '13px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontWeight: 600, color: isCurrent ? '#065f46' : '#1e293b' }}>
+                          {m.filename}
+                        </span>
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>({m.size_mb} MB)</span>
+                      </div>
+                      {isCurrent ? (
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: '#059669', background: '#d1fae5', padding: '2px 8px', borderRadius: '4px' }}>
+                          Đang dùng
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '12px', color: '#f97316', fontWeight: 500 }}>
+                          Chọn model này &rarr;
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {switchFeedback && (
+                <div style={{ marginTop: '8px', fontSize: '12px', color: switchFeedback.startsWith('Lỗi') ? '#ef4444' : '#059669' }}>
+                  {switchFeedback}
+                </div>
+              )}
+            </div>
+
             {modelStatus?.error_message && (
               <div className="settings-note-banner">
                 {modelStatus.error_message}

@@ -7,7 +7,7 @@ import {
   Gauge,
   HelpCircle,
 } from 'lucide-react';
-import type { AnalysisState, DetectionItem } from '../types';
+import type { AnalysisState, DetectionItem, ModelStatus } from '../types';
 
 interface ResultPanelProps {
   analysisState: AnalysisState;
@@ -19,6 +19,7 @@ interface ResultPanelProps {
   highlightedIndex: number | null;
   onHoverDetection: (idx: number | null) => void;
   isVideoOrCamera: boolean;
+  modelStatus?: ModelStatus | null;
 }
 
 export const ResultPanel: React.FC<ResultPanelProps> = ({
@@ -31,6 +32,7 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
   highlightedIndex,
   onHoverDetection,
   isVideoOrCamera,
+  modelStatus,
 }) => {
   const fireCount = detections.filter(
     (d) => d.class_name.toLowerCase() === 'fire'
@@ -59,6 +61,19 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
       <div className="panel-header">
         <span className="panel-title">Kết quả phân tích</span>
         {isMockMode && <span className="mock-badge-indicator">MÔ PHỎNG</span>}
+      </div>
+
+      {/* Hiển thị rõ tên model đang sử dụng */}
+      <div className="panel-model-box">
+        <span className="panel-model-label">Model:</span>
+        <span
+          className="panel-model-val"
+          title={modelStatus?.model_name || modelStatus?.model_path || 'Chưa nạp'}
+        >
+          {isMockMode
+            ? 'Mô phỏng mẫu (Mock)'
+            : (modelStatus?.model_name || (modelStatus?.is_ready ? modelStatus?.model_path || 'Mô hình AI' : 'Chưa nạp'))}
+        </span>
       </div>
 
       {/* Thẻ Trạng thái Chính cho Nguồn Hiện tại */}

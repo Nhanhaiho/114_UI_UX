@@ -104,3 +104,28 @@ export async function inferImage({
     throw new ApiError('Không thể gửi yêu cầu suy luận đến backend.', 0, 'network_error');
   }
 }
+
+export interface ModelListItem {
+  filename: string;
+  path: string;
+  size_mb: number;
+}
+
+export async function getAvailableModels(): Promise<{ current_model: string; models: ModelListItem[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/model/list`);
+  if (!res.ok) throw new ApiError('Không thể tải danh sách mô hình', res.status);
+  return await res.json();
+}
+
+export async function switchModel(modelPath: string): Promise<ModelStatus> {
+  const res = await fetch(`${API_BASE_URL}/api/model/switch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model_path: modelPath }),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new ApiError(errorData.detail || 'Không thể chuyển đổi mô hình', res.status);
+  }
+  return await res.json();
+}

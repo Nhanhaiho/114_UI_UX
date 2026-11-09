@@ -1,8 +1,11 @@
 import io
 import time
+import asyncio
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, List
+from pydantic import BaseModel
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,7 +19,7 @@ from app.schemas import (
     InferenceResponse,
     ErrorResponse,
 )
-from app.detector import YoloSRCDetector, MockDetector
+from app.detector import YoloSRCDetector, MockDetector, update_env_model_path
 
 # Cấu hình logging
 logging.basicConfig(
@@ -39,7 +42,23 @@ async def lifespan(app: FastAPI):
     real_detector = YoloSRCDetector()
     mock_detector = MockDetector()
     logger.info(f"Detector khởi tạo xong. Trạng thái mô hình thật: {'SẴN SÀNG' if real_detector.is_ready() else 'CHƯA NẠP'}")
+
+    # Background task tự động theo dõi file .env mỗi 1.5 giây
+    stop_event = asyncio.Event()
+
+    async def env_watcher():
+        while not stop_event.is_set():
+            try:
+                if real_detector:
+                    real_detector.check_env_update()
+            except Exception as e:
+                logger.debug(f"Lỗi env_watcher: {e}")
+            await asyncio.sleep(1.5)
+
+    watcher_task = asyncio.create_task(env_watcher())
     yield
+    stop_event.set()
+    watcher_task.cancel()
     logger.info("Đang tắt FastAPI server...")
 
 
@@ -82,6 +101,51 @@ async def get_model_status():
             detail="Detector chưa được khởi tạo.",
         )
     return real_detector.get_status()
+
+
+class SwitchModelRequest(BaseModel):
+    model_path: str
+
+
+@app.get("/api/model/list")
+async def list_available_models():
+    """Liệt kê danh sách các file checkpoint .pt có sẵn trong thư mục weights/"""
+    weights_dir = Path("weights")
+    models = []
+    if weights_dir.exists():
+        for p in sorted(weights_dir.glob("*.pt")):
+            models.append({
+                "filename": p.name,
+                "path": f"weights/{p.name}",
+                "size_mb": round(p.stat().st_size / (1024 * 1024), 2),
+            })
+    current_name = real_detector._model_path.name if (real_detector and real_detector._model_path) else ""
+    return {
+        "current_model": current_name,
+        "models": models,
+    }
+
+
+@app.post("/api/model/switch", response_model=ModelStatusResponse)
+async def switch_model_endpoint(req: SwitchModelRequest):
+    """Đổi model đang chạy ngay lập tức và đồng bộ vào file .env"""
+    if not real_detector:
+        raise HTTPException(status_code=503, detail="Detector chưa khởi tạo")
+    
+    target_path = Path(req.model_path)
+    if not target_path.exists():
+        target_path = Path("weights") / req.model_path
+        if not target_path.exists():
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy file checkpoint: {req.model_path}")
+    
+    try:
+        normalized_path = str(target_path).replace("\\", "/")
+        real_detector.switch_model(normalized_path)
+        update_env_model_path(normalized_path)
+        return real_detector.get_status()
+    except Exception as e:
+        logger.error(f"Lỗi khi chuyển đổi model: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Lỗi khi chuyển đổi model: {str(e)}")
 
 
 @app.post(

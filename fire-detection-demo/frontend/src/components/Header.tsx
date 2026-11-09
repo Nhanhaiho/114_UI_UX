@@ -55,23 +55,30 @@ export const Header: React.FC<HeaderProps> = ({
           <span>{isConnected ? 'Backend: Kết nối' : 'Backend: Ngắt kết nối'}</span>
         </div>
 
-        {/* 2. Chỉ báo sẵn sàng của Mô hình */}
+        {/* 2. Chỉ báo sẵn sàng và Tên Mô hình AI đang sử dụng */}
         <div
+          onClick={onOpenSettings}
+          style={{ cursor: 'pointer' }}
           className={`model-status-chip ${
             modelStatus?.is_ready ? 'model-chip-ready' : 'model-chip-unready'
           }`}
           title={
             modelStatus?.error_message ||
             (modelStatus?.is_ready
-              ? `Mô hình YOLO-SRC đang chạy trên ${modelStatus.device}`
-              : 'Chưa có file checkpoint weights/best.pt')
+              ? `Đang sử dụng mô hình: ${modelStatus.model_name || modelStatus.model_path} trên thiết bị ${modelStatus.device} (Bấm để xem/đổi mô hình)`
+              : 'Chưa nạp được file model checkpoint (Bấm để chọn mô hình)')
           }
         >
-          <span>
+          <span className="model-chip-dot" />
+          <span className="model-chip-label">Model:</span>
+          <span className="model-chip-name">
             {modelStatus?.is_ready
-              ? `Model: Sẵn sàng (${modelStatus.device})`
-              : 'Model: Chưa nạp'}
+              ? (modelStatus.model_name || modelStatus.model_path || 'Mô hình AI')
+              : 'Chưa nạp'}
           </span>
+          {modelStatus?.is_ready && (
+            <span className="model-chip-device">{modelStatus.device}</span>
+          )}
         </div>
 
         {/* 3. Công tắc chế độ Mô phỏng (chỉ bật khi người dùng chủ động chọn) */}
