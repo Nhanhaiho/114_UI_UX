@@ -1,5 +1,5 @@
 import React from 'react';
-import { Flame, Sliders } from 'lucide-react';
+import { Flame, Settings, ChevronDown } from 'lucide-react';
 import type { ModelStatus } from '../types';
 
 interface HeaderProps {
@@ -19,87 +19,79 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMockMode,
   onOpenSettings,
 }) => {
+  const getShortModelName = (status: ModelStatus | null) => {
+    if (!status?.is_ready) return 'Chưa nạp';
+    const name = status.model_name || status.model_path || '';
+    if (name.includes('P2+SRC')) return 'YOLO-SRC';
+    if (name.includes('combined') || name.includes('26n')) return 'YOLO26n';
+    if (name.includes('v10') || name.includes('V10')) return 'YOLOv10';
+    if (name.includes('v8') || name.includes('V8')) return 'YOLOv8';
+    if (name.includes('v11') || name.includes('V11')) return 'YOLOv11';
+    return name.split(' ')[0] || 'YOLO';
+  };
+
   return (
-    <header className="app-header">
+    <header className="editorial-header">
       {/* Brand logo & title */}
-      <div className="header-brand">
-        <div className="brand-icon-wrapper">
-          <Flame className="brand-flame-icon" size={18} />
-        </div>
-        <div className="brand-text">
-          <span className="brand-title">Fire Detection Studio</span>
-          <span className="brand-subtitle">AI Fire Detection Workbench</span>
-        </div>
+      <div className="editorial-brand">
+        <Flame className="editorial-flame-icon" size={20} />
+        <span className="editorial-brand-title">Fire Detection Studio</span>
       </div>
 
-      {/* Status Indicators & Controls */}
-      <div className="header-status-group">
-        {/* 1. Chỉ báo kết nối Backend */}
+      {/* Controls & Indicators */}
+      <div className="editorial-header-actions">
+        {/* 1. Trạng thái kết nối */}
         <div
-          className="indicator-pill"
-          title={
-            isConnected
-              ? 'Backend API đang phản hồi tốt (http://localhost:8000)'
-              : 'Không thể kết nối đến máy chủ backend.'
-          }
+          className="editorial-conn-pill"
+          title={isConnected ? 'Backend đang kết nối tốt' : 'Mất kết nối backend'}
         >
           <span
-            className={`status-dot ${
-              isChecking
-                ? 'status-dot-checking'
-                : isConnected
-                ? 'status-dot-online'
-                : 'status-dot-offline'
-            }`}
+            className={`conn-dot ${isChecking ? 'checking' : isConnected ? 'online' : 'offline'
+              }`}
           />
-          <span>{isConnected ? 'Backend: Kết nối' : 'Backend: Ngắt kết nối'}</span>
+          <span className="conn-text">{isConnected ? 'Kết nối' : 'Ngắt kết nối'}</span>
         </div>
 
-        {/* 2. Chỉ báo sẵn sàng và Tên Mô hình AI đang sử dụng */}
-        <div
-          onClick={onOpenSettings}
-          style={{ cursor: 'pointer' }}
-          className={`model-status-chip ${
-            modelStatus?.is_ready ? 'model-chip-ready' : 'model-chip-unready'
-          }`}
-          title={
-            modelStatus?.error_message ||
-            (modelStatus?.is_ready
-              ? `Đang sử dụng mô hình: ${modelStatus.model_name || modelStatus.model_path} trên thiết bị ${modelStatus.device} (Bấm để xem/đổi mô hình)`
-              : 'Chưa nạp được file model checkpoint (Bấm để chọn mô hình)')
-          }
-        >
-          <span className="model-chip-dot" />
-          <span className="model-chip-label">Model:</span>
-          <span className="model-chip-name">
-            {modelStatus?.is_ready
-              ? (modelStatus.model_name || modelStatus.model_path || 'Mô hình AI')
-              : 'Chưa nạp'}
-          </span>
-          {modelStatus?.is_ready && (
-            <span className="model-chip-device">{modelStatus.device}</span>
-          )}
-        </div>
+        <span className="editorial-divider">|</span>
 
-        {/* 3. Công tắc chế độ Mô phỏng (chỉ bật khi người dùng chủ động chọn) */}
+        {/* 2. Model selector dropdown pill (tên model ngắn) */}
         <button
           type="button"
-          onClick={() => onToggleMockMode(!isMockMode)}
-          className={`mock-toggle-btn ${isMockMode ? 'active' : ''}`}
-          title="Bật/Tắt chế độ mô phỏng mẫu cố định để kiểm tra giao diện khi chưa có checkpoint thật"
+          onClick={onOpenSettings}
+          className="editorial-model-btn"
+          title={
+            modelStatus?.is_ready
+              ? `Mô hình: ${modelStatus.model_name} (Bấm để xem danh sách .pt và đổi mô hình)`
+              : 'Chưa nạp checkpoint (Bấm để chọn mô hình)'
+          }
+          aria-label="Chọn mô hình AI"
         >
-          <span>Xem thử</span>
-          {isMockMode && <span className="mock-tag">MÔ PHỎNG</span>}
+          <span>{getShortModelName(modelStatus)}</span>
+          <ChevronDown size={14} className="model-chevron" />
         </button>
 
-        {/* 4. Nút mở cài đặt */}
+        {isMockMode && (
+          <button
+            type="button"
+            className="editorial-mock-chip"
+            onClick={() => onToggleMockMode(false)}
+            title="Đang bật dữ liệu mô phỏng cố định. Bấm để tắt."
+          >
+            Mô phỏng ✕
+          </button>
+        )}
+
+        <span className="editorial-divider">|</span>
+
+        {/* 3. Nút cài đặt (icon Gear) */}
         <button
           type="button"
           onClick={onOpenSettings}
-          className="header-settings-btn"
-          title="Thông số & cấu hình hệ thống"
+          className="editorial-settings-btn"
+          title="Thông số & Cấu hình Kỹ thuật"
+          aria-label="Cài đặt kỹ thuật"
         >
-          <Sliders size={16} />
+          <Settings size={18} />
         </button>
       </div>
     </header>

@@ -5,6 +5,7 @@ export interface DetectionItem {
   class_name: string;
   confidence: number;
   box: [number, number, number, number]; // [x1, y1, x2, y2] trong [0, 1]
+  isConfirmedFire?: boolean;
 }
 
 export interface InferenceResponse {
@@ -44,6 +45,18 @@ export interface FireEventRecord {
   formattedTime: string;
   count: number;
   max_confidence: number;
+}
+
+export interface FireAlertEvent {
+  id: string;
+  firstSeenMs: number;
+  confirmedTimeMs: number;
+  formattedTime: string;
+  box: [number, number, number, number];
+  maxConfidence: number;
+  isMock: boolean;
+  isActive: boolean;
+  endedAtMs?: number;
 }
 
 export interface RenderViewportRect {

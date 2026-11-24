@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Cpu, Server, Sliders, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import { X, Cpu, Server, Sliders, CheckCircle, AlertCircle, RefreshCw, Sparkles } from 'lucide-react';
 import type { ModelStatus, BackendHealth } from '../types';
 import { getAvailableModels, switchModel, type ModelListItem } from '../services/api';
 
@@ -17,6 +17,8 @@ interface AdvancedSettingsModalProps {
   showLabels: boolean;
   onToggleShowLabels: () => void;
   onRefreshStatus?: () => void;
+  isMockMode: boolean;
+  onToggleMockMode: (val: boolean) => void;
 }
 
 export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
@@ -33,6 +35,8 @@ export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
   showLabels,
   onToggleShowLabels,
   onRefreshStatus,
+  isMockMode,
+  onToggleMockMode,
 }) => {
   const [modelList, setModelList] = useState<ModelListItem[]>([]);
   const [isSwitching, setIsSwitching] = useState<boolean>(false);
@@ -45,6 +49,16 @@ export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
         .catch(() => {});
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   const handleSelectModel = async (modelPath: string) => {
     setIsSwitching(true);
@@ -65,13 +79,24 @@ export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-settings-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
           <div className="modal-title-group">
             <Sliders size={20} className="text-amber-500" />
-            <h3 className="modal-title">Thông số & Cấu hình Kỹ thuật</h3>
+            <h3 id="modal-settings-title" className="modal-title">Thông số & Cấu hình Kỹ thuật</h3>
           </div>
-          <button type="button" onClick={onClose} className="icon-subtle-btn">
+          <button
+            type="button"
+            onClick={onClose}
+            className="icon-subtle-btn"
+            aria-label="Đóng bảng cài đặt"
+          >
             <X size={18} />
           </button>
         </div>
@@ -266,6 +291,30 @@ export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
                 />
                 <span>Hiển thị nhãn tên lớp và tỷ lệ phần trăm trên Bounding Box</span>
               </label>
+            </div>
+          </div>
+
+          {/* Nhóm 3: Chế độ Kiểm thử Ngoại tuyến (Mock Data) */}
+          <div className="settings-section">
+            <h4 className="settings-section-title">
+              <Sparkles size={16} />
+              <span>Chế độ Kiểm thử Ngoại tuyến (Mock Data)</span>
+            </h4>
+            <div className="setting-checkbox-item">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={isMockMode}
+                  onChange={(e) => onToggleMockMode(e.target.checked)}
+                  className="checkbox-input"
+                />
+                <span className="font-medium text-slate-800">
+                  Bật dữ liệu mô phỏng cố định (Mock)
+                </span>
+              </label>
+              <p className="setting-hint" style={{ marginTop: '4px', paddingLeft: '24px' }}>
+                Chỉ nên bật khi cần kiểm thử luồng giao diện mà không có kết nối đến máy chủ AI backend.
+              </p>
             </div>
           </div>
         </div>

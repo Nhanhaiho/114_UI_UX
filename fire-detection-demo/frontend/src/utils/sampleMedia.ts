@@ -92,3 +92,105 @@ export async function createSampleImageBlob(hasFire: boolean): Promise<Blob> {
   });
 }
 
+/**
+ * Tiện ích tải hoặc tạo video mẫu ngắn phục vụ kiểm thử nhanh tab Video
+ */
+export async function createSampleVideoBlob(): Promise<Blob> {
+  try {
+    const res = await fetch('/samples/sample_fire.mp4');
+    if (res.ok) {
+      const blob = await res.blob();
+      if (blob.size > 1000) return blob;
+    }
+  } catch {
+    // Fallback tạo video bằng MediaRecorder
+  }
+
+  return new Promise((resolve) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 360;
+    const ctx = canvas.getContext('2d')!;
+
+    // MediaRecorder trên stream canvas
+    let recorder: MediaRecorder;
+    try {
+      const stream = canvas.captureStream(20);
+      const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? 'video/webm;codecs=vp9'
+        : 'video/webm';
+      recorder = new MediaRecorder(stream, { mimeType: mime });
+    } catch {
+      resolve(new Blob([], { type: 'video/mp4' }));
+      return;
+    }
+
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+
+    recorder.onstop = () => {
+      resolve(new Blob(chunks, { type: 'video/webm' }));
+    };
+
+    recorder.start();
+
+    let frame = 0;
+    const totalFrames = 50; // 2.5 giây
+
+    const interval = setInterval(() => {
+      const bgGrad = ctx.createLinearGradient(0, 0, 0, 360);
+      bgGrad.addColorStop(0, '#0f172a');
+      bgGrad.addColorStop(1, '#1e293b');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, 640, 360);
+
+      const flicker = Math.sin(frame * 0.4) * 8;
+      const fireX = 320;
+      const fireY = 230 + flicker;
+
+      // Glow
+      const glow = ctx.createRadialGradient(fireX, fireY, 15, fireX, fireY, 90);
+      glow.addColorStop(0, 'rgba(239, 68, 68, 0.6)');
+      glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(fireX, fireY, 90, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Thân lửa
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.arc(fireX, fireY, 35, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Tâm lửa
+      ctx.fillStyle = '#fef08a';
+      ctx.beginPath();
+      ctx.arc(fireX, fireY, 18, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Khói
+      ctx.fillStyle = 'rgba(148, 163, 184, 0.35)';
+      ctx.beginPath();
+      ctx.arc(fireX - 15 + Math.sin(frame * 0.3) * 10, fireY - 90 - (frame % 20), 25, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = '14px sans-serif';
+      ctx.fillText(`Video mẫu đám cháy AI - Frame ${frame + 1}/${totalFrames}`, 20, 30);
+
+      frame++;
+      if (frame >= totalFrames) {
+        clearInterval(interval);
+        try {
+          recorder.stop();
+        } catch {
+          resolve(new Blob(chunks, { type: 'video/webm' }));
+        }
+      }
+    }, 50);
+  });
+}
+

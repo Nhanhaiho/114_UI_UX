@@ -127,20 +127,20 @@ export const EmptyUploadArea: React.FC<EmptyUploadAreaProps> = ({
         <span>{isVideo ? 'Chọn tệp video' : 'Chọn tệp ảnh'}</span>
       </button>
 
-      {!isVideo && (
-        <div
-          className="sample-quick-buttons"
-          onClick={(e) => e.stopPropagation()}
+      <div
+        className="sample-quick-buttons"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span className="sample-label">Thử nhanh mẫu:</span>
+        <button
+          type="button"
+          className="sample-chip-btn"
+          onClick={() => onLoadSample(true)}
         >
-          <span className="sample-label">Thử nhanh mẫu:</span>
-          <button
-            type="button"
-            className="sample-chip-btn"
-            onClick={() => onLoadSample(true)}
-          >
-            <Sparkles size={12} className="text-amber-500" />
-            <span>Ảnh mẫu có lửa</span>
-          </button>
+          <Sparkles size={12} className="text-amber-500" />
+          <span>{isVideo ? 'Video mẫu có lửa' : 'Ảnh mẫu có lửa'}</span>
+        </button>
+        {!isVideo && (
           <button
             type="button"
             className="sample-chip-btn"
@@ -148,8 +148,8 @@ export const EmptyUploadArea: React.FC<EmptyUploadAreaProps> = ({
           >
             <span>Ảnh không có lửa</span>
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };

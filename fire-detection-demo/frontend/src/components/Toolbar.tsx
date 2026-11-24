@@ -1,263 +1,254 @@
 import React from 'react';
 import {
-  Play,
-  Pause,
-  Volume2,
-  VolumeX,
-  Maximize2,
   Flame,
   Eye,
   EyeOff,
+  Maximize2,
   FolderOpen,
-  PowerOff,
+  Camera,
+  CameraOff,
   FlipHorizontal,
+  RotateCcw,
 } from 'lucide-react';
 import type { SourceType } from '../types';
-import { formatTime } from '../utils/coordinateUtils';
 
 interface ToolbarProps {
   sourceType: SourceType;
-  // Image
-  onInferImage: () => void;
-  isAnalyzing: boolean;
-  canInferImage: boolean;
-  onChangeFile: () => void;
 
-  // Video
-  isPlaying: boolean;
-  onTogglePlay: () => void;
-  currentTime: number;
-  duration: number;
-  onSeek: (time: number) => void;
-  playbackRate: number;
-  onChangePlaybackRate: (rate: number) => void;
-  volume: number;
-  isMuted: boolean;
-  onVolumeChange: (vol: number) => void;
-  onToggleMute: () => void;
-
-  // Camera
-  onStopCamera: () => void;
-  isMirrored: boolean;
-  onToggleMirror: () => void;
-
-  // Common
+  // AI & Visual Overlays
   isDetectionActive: boolean;
-  onToggleDetectionActive: (active: boolean) => void;
+  onToggleDetectionActive: (val: boolean) => void;
   showBoxes: boolean;
   onToggleShowBoxes: () => void;
   confidenceThreshold: number;
-  onChangeConfidence: (conf: number) => void;
+  onChangeConfidence: (val: number) => void;
+
+  // Image actions
+  onReinferImage?: () => void;
+  isAnalyzing?: boolean;
+  onChangeImageFile?: () => void;
+
+  // Video actions
+  playbackRate?: number;
+  onChangePlaybackRate?: (rate: number) => void;
+  onChangeVideoFile?: () => void;
+
+  // Camera actions
+  isCameraActive?: boolean;
+  onStartCamera?: () => void;
+  onStopCamera?: () => void;
+  isMirrored?: boolean;
+  onToggleMirror?: () => void;
+  cameraDevices?: MediaDeviceInfo[];
+  selectedDeviceId?: string;
+  onSelectDeviceId?: (id: string) => void;
+
+  // Fullscreen
   onToggleFullscreen: () => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
   sourceType,
-  onInferImage,
-  isAnalyzing,
-  canInferImage,
-  onChangeFile,
-  isPlaying,
-  onTogglePlay,
-  currentTime,
-  duration,
-  onSeek,
-  playbackRate,
-  onChangePlaybackRate,
-  volume,
-  isMuted,
-  onVolumeChange,
-  onToggleMute,
-  onStopCamera,
-  isMirrored,
-  onToggleMirror,
   isDetectionActive,
   onToggleDetectionActive,
   showBoxes,
   onToggleShowBoxes,
   confidenceThreshold,
   onChangeConfidence,
+  onReinferImage,
+  isAnalyzing,
+  onChangeImageFile,
+  playbackRate = 1.0,
+  onChangePlaybackRate,
+  onChangeVideoFile,
+  isCameraActive,
+  onStartCamera,
+  onStopCamera,
+  isMirrored,
+  onToggleMirror,
+  cameraDevices,
+  selectedDeviceId,
+  onSelectDeviceId,
   onToggleFullscreen,
 }) => {
   return (
-    <div className="media-toolbar">
-      {/* 1. Timeline Seek Bar cho Video */}
-      {sourceType === 'video' && (
-        <div className="video-timeline-row">
-          <span className="time-display">{formatTime(currentTime)}</span>
-          <input
-            type="range"
-            min={0}
-            max={duration || 100}
-            step={0.05}
-            value={currentTime}
-            onChange={(e) => onSeek(parseFloat(e.target.value))}
-            className="timeline-slider"
-          />
-          <span className="time-display">{formatTime(duration)}</span>
-        </div>
-      )}
-
-      {/* 2. Hàng điều khiển chính */}
-      <div className="toolbar-controls-row">
-        {/* Nhóm trái */}
-        <div className="toolbar-left-group">
-          {sourceType === 'image' && (
-            <>
-              <button
-                type="button"
-                onClick={onInferImage}
-                disabled={!canInferImage || isAnalyzing}
-                className="primary-fire-btn"
-                title="Gửi ảnh để phát hiện lửa"
-              >
-                <Flame size={14} />
-                <span>{isAnalyzing ? 'Đang suy luận...' : 'Phát hiện lửa'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={onChangeFile}
-                className="tool-btn"
-                title="Chọn một tệp hình ảnh khác"
-              >
-                <FolderOpen size={13} />
-                <span>Đổi ảnh</span>
-              </button>
-            </>
-          )}
-
-          {sourceType === 'video' && (
-            <>
-              <button
-                type="button"
-                onClick={onTogglePlay}
-                className="play-pause-btn"
-                title={isPlaying ? 'Tạm dừng (Phím cách)' : 'Phát (Phím cách)'}
-              >
-                {isPlaying ? <Pause size={14} /> : <Play size={14} />}
-              </button>
-
-              <select
-                value={playbackRate}
-                onChange={(e) => onChangePlaybackRate(parseFloat(e.target.value))}
-                className="toolbar-select"
-                title="Tốc độ phát video"
-              >
-                <option value={0.5}>0.5x</option>
-                <option value={1.0}>1.0x</option>
-                <option value={1.25}>1.25x</option>
-                <option value={1.5}>1.5x</option>
-                <option value={2.0}>2.0x</option>
-              </select>
-
-              <div className="volume-control-group">
-                <button
-                  type="button"
-                  onClick={onToggleMute}
-                  className="tool-icon-btn"
-                  title={isMuted ? 'Bật âm thanh' : 'Tắt tiếng'}
-                >
-                  {isMuted || volume === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
-                </button>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={isMuted ? 0 : volume}
-                  onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
-                  className="volume-slider"
-                  title="Âm lượng"
-                />
-              </div>
-
-              <button
-                type="button"
-                onClick={onChangeFile}
-                className="tool-btn"
-                title="Tải tệp video khác"
-              >
-                <FolderOpen size={13} />
-                <span>Đổi video</span>
-              </button>
-            </>
-          )}
-
-          {sourceType === 'camera' && (
-            <>
-              <button
-                type="button"
-                onClick={onStopCamera}
-                className="danger-btn"
-                title="Dừng và giải phóng webcam"
-              >
-                <PowerOff size={13} />
-                <span>Tắt Camera</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={onToggleMirror}
-                className={`tool-btn ${isMirrored ? 'tool-btn-active' : ''}`}
-                title="Lật gương hình ảnh webcam"
-              >
-                <FlipHorizontal size={13} />
-                <span>Lật gương</span>
-              </button>
-            </>
-          )}
-        </div>
-
-        {/* Nhóm phải: Nhận diện AI, Box overlay, Ngưỡng tin cậy, Toàn màn hình */}
-        <div className="toolbar-right-group">
-          {(sourceType === 'video' || sourceType === 'camera') && (
+    <div className="editorial-toolbar" role="toolbar" aria-label="Thanh điều khiển AI và Media">
+      {/* NHÓM 1: CÁC NÚT ĐẶC THÙ THEO NGUỒN (Trái) */}
+      <div className="toolbar-section-left">
+        {/* Nguồn ẢNH */}
+        {sourceType === 'image' && (
+          <>
             <button
               type="button"
-              onClick={() => onToggleDetectionActive(!isDetectionActive)}
-              className={`ai-toggle-switch ${isDetectionActive ? 'active' : ''}`}
-              title="Bật/Tắt gửi frame lên máy chủ để suy luận AI (Không ảnh hưởng đến trình phát)"
+              className="toolbar-btn primary-action"
+              onClick={onReinferImage}
+              disabled={isAnalyzing}
+              title="Phân tích lại ảnh hiện tại với mô hình hoặc ngưỡng đã chọn"
             >
-              <Flame size={14} />
-              <span>{isDetectionActive ? 'Nhận diện AI: BẬT' : 'Nhận diện AI: TẮT'}</span>
+              <RotateCcw size={14} className={isAnalyzing ? 'animate-spin' : ''} />
+              <span>{isAnalyzing ? 'Đang suy luận...' : 'Phân tích lại'}</span>
             </button>
-          )}
 
+            {onChangeImageFile && (
+              <button
+                type="button"
+                className="toolbar-btn subtle"
+                onClick={onChangeImageFile}
+                title="Chọn một tệp hình ảnh khác từ máy tính"
+              >
+                <FolderOpen size={14} />
+                <span>Đổi ảnh</span>
+              </button>
+            )}
+          </>
+        )}
+
+        {/* Nguồn VIDEO */}
+        {sourceType === 'video' && (
+          <>
+            {/* Đổi tốc độ phát (không trùng với trình phát native) */}
+            {onChangePlaybackRate && (
+              <div className="toolbar-control-wrap" title="Tốc độ phát video">
+                <span className="control-sublabel">Tốc độ:</span>
+                <select
+                  value={playbackRate}
+                  onChange={(e) => onChangePlaybackRate(parseFloat(e.target.value))}
+                  className="toolbar-select-inline"
+                >
+                  <option value={0.5}>0.5x</option>
+                  <option value={1.0}>1.0x</option>
+                  <option value={1.25}>1.25x</option>
+                  <option value={1.5}>1.5x</option>
+                  <option value={2.0}>2.0x</option>
+                </select>
+              </div>
+            )}
+
+            {onChangeVideoFile && (
+              <button
+                type="button"
+                className="toolbar-btn subtle"
+                onClick={onChangeVideoFile}
+                title="Chọn một tệp video khác từ máy tính"
+              >
+                <FolderOpen size={14} />
+                <span>Đổi video</span>
+              </button>
+            )}
+          </>
+        )}
+
+        {/* Nguồn WEBCAM */}
+        {sourceType === 'camera' && (
+          <>
+            {/* Nút Bật/Tắt Camera (riêng biệt với nhận diện AI) */}
+            {isCameraActive ? (
+              <button
+                type="button"
+                className="toolbar-btn danger"
+                onClick={onStopCamera}
+                title="Tắt luồng webcam máy tính"
+              >
+                <CameraOff size={14} />
+                <span>Tắt Camera</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="toolbar-btn primary-action"
+                onClick={onStartCamera}
+                title="Bật webcam máy tính"
+              >
+                <Camera size={14} />
+                <span>Mở Camera</span>
+              </button>
+            )}
+
+            {/* Lật gương */}
+            {onToggleMirror && (
+              <button
+                type="button"
+                className={`toolbar-btn ${isMirrored ? 'active-pill' : 'subtle'}`}
+                onClick={onToggleMirror}
+                title="Lật gương hình ảnh webcam"
+              >
+                <FlipHorizontal size={14} />
+                <span>Lật gương</span>
+              </button>
+            )}
+
+            {/* Chọn thiết bị camera nếu có nhiều camera */}
+            {cameraDevices && cameraDevices.length > 1 && (
+              <select
+                value={selectedDeviceId}
+                onChange={(e) => onSelectDeviceId?.(e.target.value)}
+                className="toolbar-select-inline"
+                title="Chọn thiết bị camera"
+              >
+                {cameraDevices.map((d) => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.label || `Camera ${d.deviceId.slice(0, 5)}`}
+                  </option>
+                ))}
+              </select>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* NHÓM 2: ĐIỀU KHIỂN AI & LỚP HIỂN THỊ CHUNG (Phải) */}
+      <div className="toolbar-section-right">
+        {/* Nút BẬT/TẮT NHẬN DIỆN AI (áp dụng cho Video và Camera) */}
+        {(sourceType === 'video' || sourceType === 'camera') && (
           <button
             type="button"
-            onClick={onToggleShowBoxes}
-            className={`tool-btn ${showBoxes ? 'tool-btn-active' : ''}`}
-            title="Ẩn/Hiện lớp vẽ Bounding Box (Không can thiệp tiến trình AI hay phát media)"
+            className={`toolbar-ai-toggle ${isDetectionActive ? 'active' : 'inactive'}`}
+            onClick={() => onToggleDetectionActive(!isDetectionActive)}
+            title="Bật/Tắt gửi khung hình lên mô hình AI (Video/Camera vẫn phát độc lập)"
           >
-            {showBoxes ? <Eye size={14} /> : <EyeOff size={14} />}
-            <span>{showBoxes ? 'Hiện Box' : 'Ẩn Box'}</span>
+            <Flame size={14} className={isDetectionActive ? 'text-amber-500 fill-amber-500' : 'text-stone-400'} />
+            <span>{isDetectionActive ? 'Nhận diện: BẬT' : 'Nhận diện: TẮT'}</span>
           </button>
+        )}
 
-          <div className="confidence-group">
-            <span className="conf-label">
-              Ngưỡng: <strong>{Math.round(confidenceThreshold * 100)}%</strong>
-            </span>
-            <input
-              type="range"
-              min={0.1}
-              max={0.9}
-              step={0.05}
-              value={confidenceThreshold}
-              onChange={(e) => onChangeConfidence(parseFloat(e.target.value))}
-              className="conf-slider"
-              title="Ngưỡng lọc điểm tin cậy"
-            />
-          </div>
+        {/* Nút ẨN/HIỆN BOUNDING BOX */}
+        <button
+          type="button"
+          className={`toolbar-btn ${showBoxes ? 'active-pill' : 'subtle'}`}
+          onClick={onToggleShowBoxes}
+          title="Ẩn hoặc hiện các khung Bounding Box trên màn hình"
+        >
+          {showBoxes ? <Eye size={14} /> : <EyeOff size={14} />}
+          <span>{showBoxes ? 'Hiện Box' : 'Ẩn Box'}</span>
+        </button>
 
-          <button
-            type="button"
-            onClick={onToggleFullscreen}
-            className="tool-icon-btn"
-            title="Xem toàn màn hình"
-          >
-            <Maximize2 size={15} />
-          </button>
+        {/* THANH TRƯỢT NGƯỠNG TIN CẬY (Confidence Threshold) */}
+        <div className="toolbar-confidence-control" title="Điều chỉnh ngưỡng lọc độ tin cậy của mô hình">
+          <span className="conf-label">
+            Ngưỡng: <strong>{Math.round(confidenceThreshold * 100)}%</strong>
+          </span>
+          <input
+            type="range"
+            min={0.1}
+            max={0.9}
+            step={0.05}
+            value={confidenceThreshold}
+            onChange={(e) => onChangeConfidence(parseFloat(e.target.value))}
+            className="toolbar-conf-slider"
+            aria-label="Ngưỡng lọc độ tin cậy"
+          />
         </div>
+
+        {/* NÚT TOÀN MÀN HÌNH */}
+        <button
+          type="button"
+          className="toolbar-icon-btn"
+          onClick={onToggleFullscreen}
+          title="Phóng to toàn màn hình vùng xem"
+          aria-label="Toàn màn hình"
+        >
+          <Maximize2 size={15} />
+        </button>
       </div>
     </div>
   );
