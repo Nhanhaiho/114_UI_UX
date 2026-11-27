@@ -49,6 +49,7 @@ class YoloSRCDetector(DetectorAdapter):
         self._model_name: Optional[str] = None
         self._classes: Dict[int, str] = {}
         self._lock = threading.Lock()
+        self._model_epoch: int = 1
         
         # Thiết bị
         import torch
@@ -58,10 +59,68 @@ class YoloSRCDetector(DetectorAdapter):
             self._device = "cuda:0" if torch.cuda.is_available() else "cpu"
         
         self._imgsz = settings.IMGSZ
+        self._env_file_path = Path(__file__).resolve().parent.parent / ".env"
+        self._last_env_mtime = self._get_env_mtime()
         self._model_path = Path(settings.MODEL_PATH)
         self._model_code_dir = Path(settings.MODEL_CODE_DIR)
         
         self._load_model()
+
+    def _get_env_mtime(self) -> float:
+        try:
+            if self._env_file_path.exists():
+                return os.path.getmtime(self._env_file_path)
+        except Exception:
+            pass
+        return 0.0
+
+    def check_env_update(self) -> bool:
+        """Kiểm tra xem file .env có bị chỉnh sửa không. Nếu có, tự động nạp lại model. Trả về True nếu đã đổi."""
+        try:
+            current_mtime = self._get_env_mtime()
+            if current_mtime > self._last_env_mtime:
+                self._last_env_mtime = current_mtime
+                if not self._env_file_path.exists():
+                    return False
+                with open(self._env_file_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+
+                new_model_path_str = None
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith("#") or not line:
+                        continue
+                    if line.startswith("MODEL_PATH="):
+                        val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        if val:
+                            new_model_path_str = val
+                            break
+
+                if new_model_path_str:
+                    new_path = Path(new_model_path_str)
+                    if new_path.name != self._model_path.name:
+                        logger.info(f"[Auto-Reload] Phát hiện file .env thay đổi! Đang tự động đổi model: {self._model_path.name} -> {new_path.name}")
+                        self.switch_model(str(new_path))
+                        return True
+        except Exception as e:
+            logger.error(f"Lỗi khi kiểm tra cập nhật file .env: {e}")
+        return False
+
+    @property
+    def model_epoch(self) -> int:
+        return self._model_epoch
+
+    @property
+    def model_filename(self) -> str:
+        return self._model_path.name if self._model_path else "YOLO26n"
+
+    def switch_model(self, new_model_path: str):
+        """Nạp động model mới trong bộ nhớ GPU/CPU và tăng epoch để loại bỏ frame model cũ"""
+        with self._lock:
+            self._model_path = Path(new_model_path)
+            self._model_epoch += 1
+            self._load_model()
+            logger.info(f"Đã nạp model mới thành công: {self._model_name} (epoch={self._model_epoch}, Sẵn sàng: {self._is_ready})")
 
     def _setup_custom_modules(self):
         """Thêm thư mục chứa mã nguồn SRC vào sys.path để PyTorch unpickling nhận diện được module"""
@@ -71,6 +130,15 @@ class YoloSRCDetector(DetectorAdapter):
                 sys.path.insert(0, code_dir_str)
                 logger.info(f"Đã thêm đường dẫn module SRC vào sys.path: {code_dir_str}")
 
+        # Tự động nạp src_coattention trước để các lớp CrossDirection, SpatialRelationCoAttention, P2WithSRC, SRCDetectionModel sẵn sàng
+        try:
+            import src_coattention
+            if hasattr(src_coattention, "register_src"):
+                src_coattention.register_src()
+            logger.info("Đã đăng ký thành công module SRC (src_coattention) vào Ultralytics.")
+        except Exception as e:
+            logger.debug(f"Không thể import src_coattention tự động: {e}")
+
         # Tự động nạp và đăng ký SpatialRelationalCoAttention nếu có trong model_code
         try:
             import src.modules.attention.src as src_module
@@ -79,6 +147,15 @@ class YoloSRCDetector(DetectorAdapter):
             logger.info("Đã đăng ký thành công module SRC (SpatialRelationalCoAttention) vào Ultralytics.")
         except Exception as e:
             logger.debug(f"Không thể import src.modules.attention.src tự động: {e}")
+
+        # Tự động nạp và đăng ký NeckSpatialRelationCoAttention (src.modules.co_attention.neck)
+        try:
+            import src.modules.co_attention.neck as neck_src_module
+            if hasattr(neck_src_module, "register_neck_src"):
+                neck_src_module.register_neck_src()
+            logger.info("Đã đăng ký thành công module Neck SRC (src.modules.co_attention.neck) vào Ultralytics.")
+        except Exception as e:
+            logger.debug(f"Không thể import src.modules.co_attention.neck tự động: {e}")
 
     def _load_model(self):
         self._setup_custom_modules()
@@ -103,8 +180,29 @@ class YoloSRCDetector(DetectorAdapter):
             else:
                 self._classes = {0: "fire", 1: "smoke"}
 
-            has_src = any("SpatialRelationalCoAttention" in str(type(m)) for m in self._model.model.modules()) if hasattr(self._model, 'model') else False
-            arch_tag = "YOLO26n-P2+SRC" if has_src else "YOLO26n"
+            has_src = any(
+                any(kw in str(type(m)) for kw in ["SpatialRelat", "SRC", "P2WithSRC"])
+                for m in self._model.model.modules()
+            ) if hasattr(self._model, 'model') else False
+
+            name_lower = self._model_path.name.lower()
+            if has_src:
+                arch_tag = "YOLO26n-P2+SRC"
+            elif "plain" in name_lower:
+                arch_tag = "YOLO26n-Plain"
+            elif "p2" in name_lower:
+                arch_tag = "YOLO26n-P2"
+            elif "v10" in name_lower:
+                arch_tag = "YOLOv10"
+            elif "v11" in name_lower:
+                arch_tag = "YOLOv11"
+            elif "v8" in name_lower:
+                arch_tag = "YOLOv8"
+            elif "26n" in name_lower:
+                arch_tag = "YOLO26n"
+            else:
+                arch_tag = "YOLO"
+
             self._model_name = f"{arch_tag} ({self._model_path.name})"
             self._is_ready = True
             self._error_message = None
@@ -122,6 +220,7 @@ class YoloSRCDetector(DetectorAdapter):
         return self._is_ready
 
     def get_status(self) -> ModelStatusResponse:
+        self.check_env_update()
         notes = (
             "Mô hình đã sẵn sàng cho suy luận thực tế."
             if self._is_ready
@@ -234,4 +333,24 @@ class MockDetector(DetectorAdapter):
             )
 
         return detections, inference_ms, "mock"
+
+
+def update_env_model_path(new_model_path: str):
+    """Cập nhật MODEL_PATH vào file .env trên đĩa"""
+    env_file = Path(__file__).resolve().parent.parent / ".env"
+    if not env_file.exists():
+        return
+    with open(env_file, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    import re
+    # Chuẩn hóa dấu gạch chéo
+    normalized_path = new_model_path.replace("\\", "/")
+    if re.search(r"^MODEL_PATH=.*$", content, flags=re.MULTILINE):
+        new_content = re.sub(r"^MODEL_PATH=.*$", f"MODEL_PATH={normalized_path}", content, flags=re.MULTILINE)
+    else:
+        new_content = content + f"\nMODEL_PATH={normalized_path}\n"
+
+    with open(env_file, "w", encoding="utf-8") as f:
+        f.write(new_content)
 

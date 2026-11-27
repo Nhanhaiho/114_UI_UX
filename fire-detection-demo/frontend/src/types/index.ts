@@ -5,6 +5,7 @@ export interface DetectionItem {
   class_name: string;
   confidence: number;
   box: [number, number, number, number]; // [x1, y1, x2, y2] trong [0, 1]
+  isConfirmedFire?: boolean;
 }
 
 export interface InferenceResponse {
@@ -44,6 +45,49 @@ export interface FireEventRecord {
   formattedTime: string;
   count: number;
   max_confidence: number;
+}
+
+export interface FireAlertEvent {
+  id: string;
+  firstSeenMs: number;
+  confirmedTimeMs: number;
+  formattedTime: string;
+  box: [number, number, number, number];
+  maxConfidence: number;
+  isMock: boolean;
+  isActive: boolean;
+  endedAtMs?: number;
+  emailDispatchStatus?: 'pending' | 'sent' | 'failed';
+  emailDispatchMode?: 'real' | 'mock' | 'error';
+  emailDispatchError?: string | null;
+}
+
+export interface TestEmailFeedback {
+  type: 'pending' | 'accepted' | 'simulated' | 'error';
+  message: string;
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+}
+
+export interface UserEmailPreferences {
+  user_id: string;
+  email: string;
+  email_alerts_enabled: boolean;
+  updated_at?: string;
+}
+
+export interface EmailDispatchItem {
+  event_id: string;
+  session_id: string;
+  recipient_email: string;
+  status: 'pending' | 'sent' | 'failed';
+  mode?: 'real' | 'mock' | 'error';
+  error_message?: string | null;
+  sent_at?: string | null;
+  created_at: string;
 }
 
 export interface RenderViewportRect {

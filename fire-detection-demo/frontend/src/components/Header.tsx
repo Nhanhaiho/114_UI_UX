@@ -1,6 +1,7 @@
 import React from 'react';
-import { Flame, Sliders } from 'lucide-react';
-import type { ModelStatus } from '../types';
+import { Flame, Settings, ChevronDown, User, LogOut } from 'lucide-react';
+import type { ModelStatus, UserProfile } from '../types';
+import { getShortModelName } from '../utils/modelUtils';
 
 interface HeaderProps {
   isConnected: boolean;
@@ -9,6 +10,9 @@ interface HeaderProps {
   isMockMode: boolean;
   onToggleMockMode: (val: boolean) => void;
   onOpenSettings: () => void;
+  user?: UserProfile | null;
+  onOpenAuth?: () => void;
+  onSignOut?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -18,81 +22,105 @@ export const Header: React.FC<HeaderProps> = ({
   isMockMode,
   onToggleMockMode,
   onOpenSettings,
+  user,
+  onOpenAuth,
+  onSignOut,
 }) => {
   return (
-    <header className="app-header">
+    <header className="editorial-header">
       {/* Brand logo & title */}
-      <div className="header-brand">
-        <div className="brand-icon-wrapper">
-          <Flame className="brand-flame-icon" size={18} />
-        </div>
-        <div className="brand-text">
-          <span className="brand-title">Fire Detection Studio</span>
-          <span className="brand-subtitle">AI Fire Detection Workbench</span>
-        </div>
+      <div className="editorial-brand">
+        <Flame className="editorial-flame-icon" size={20} />
+        <span className="editorial-brand-title">Fire Detection Studio</span>
       </div>
 
-      {/* Status Indicators & Controls */}
-      <div className="header-status-group">
-        {/* 1. Chỉ báo kết nối Backend */}
+      {/* Controls & Indicators */}
+      <div className="editorial-header-actions">
+        {/* 1. Trạng thái kết nối */}
         <div
-          className="indicator-pill"
-          title={
-            isConnected
-              ? 'Backend API đang phản hồi tốt (http://localhost:8000)'
-              : 'Không thể kết nối đến máy chủ backend.'
-          }
+          className="editorial-conn-pill"
+          title={isConnected ? 'Backend đang kết nối tốt' : 'Mất kết nối backend'}
         >
           <span
-            className={`status-dot ${
-              isChecking
-                ? 'status-dot-checking'
-                : isConnected
-                ? 'status-dot-online'
-                : 'status-dot-offline'
+            className={`conn-dot ${
+              isChecking ? 'checking' : isConnected ? 'online' : 'offline'
             }`}
           />
-          <span>{isConnected ? 'Backend: Kết nối' : 'Backend: Ngắt kết nối'}</span>
+          <span className="conn-text">{isConnected ? 'Kết nối' : 'Ngắt kết nối'}</span>
         </div>
 
-        {/* 2. Chỉ báo sẵn sàng của Mô hình */}
-        <div
-          className={`model-status-chip ${
-            modelStatus?.is_ready ? 'model-chip-ready' : 'model-chip-unready'
-          }`}
-          title={
-            modelStatus?.error_message ||
-            (modelStatus?.is_ready
-              ? `Mô hình YOLO-SRC đang chạy trên ${modelStatus.device}`
-              : 'Chưa có file checkpoint weights/best.pt')
-          }
-        >
-          <span>
-            {modelStatus?.is_ready
-              ? `Model: Sẵn sàng (${modelStatus.device})`
-              : 'Model: Chưa nạp'}
-          </span>
-        </div>
+        <span className="editorial-divider">|</span>
 
-        {/* 3. Công tắc chế độ Mô phỏng (chỉ bật khi người dùng chủ động chọn) */}
-        <button
-          type="button"
-          onClick={() => onToggleMockMode(!isMockMode)}
-          className={`mock-toggle-btn ${isMockMode ? 'active' : ''}`}
-          title="Bật/Tắt chế độ mô phỏng mẫu cố định để kiểm tra giao diện khi chưa có checkpoint thật"
-        >
-          <span>Xem thử</span>
-          {isMockMode && <span className="mock-tag">MÔ PHỎNG</span>}
-        </button>
-
-        {/* 4. Nút mở cài đặt */}
+        {/* 2. Model selector dropdown pill (tên model ngắn) */}
         <button
           type="button"
           onClick={onOpenSettings}
-          className="header-settings-btn"
-          title="Thông số & cấu hình hệ thống"
+          className="editorial-model-btn"
+          title={
+            modelStatus?.is_ready
+              ? `Mô hình: ${modelStatus.model_name} (Bấm để xem danh sách .pt và đổi mô hình)`
+              : 'Chưa nạp checkpoint (Bấm để chọn mô hình)'
+          }
+          aria-label="Chọn mô hình AI"
         >
-          <Sliders size={16} />
+          <span>{getShortModelName(modelStatus)}</span>
+          <ChevronDown size={14} className="model-chevron" />
+        </button>
+
+        {isMockMode && (
+          <button
+            type="button"
+            className="editorial-mock-chip"
+            onClick={() => onToggleMockMode(false)}
+            title="Đang bật dữ liệu mô phỏng cố định. Bấm để tắt."
+          >
+            Mô phỏng ✕
+          </button>
+        )}
+
+        <span className="editorial-divider">|</span>
+
+        {/* 3. Đăng nhập / Tài khoản */}
+        {user ? (
+          <div className="editorial-user-pill" title={`Đã đăng nhập: ${user.email}`}>
+            <span className="user-dot online" />
+            <span className="user-email">{user.email}</span>
+            {onSignOut && (
+              <button
+                type="button"
+                className="editorial-signout-mini-btn"
+                onClick={onSignOut}
+                title="Đăng xuất tài khoản"
+                aria-label="Đăng xuất"
+              >
+                <LogOut size={13} />
+              </button>
+            )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={onOpenAuth}
+            className="editorial-auth-btn"
+            title="Đăng nhập để nhận cảnh báo lửa qua email"
+            aria-label="Đăng nhập"
+          >
+            <User size={14} />
+            <span>Đăng nhập</span>
+          </button>
+        )}
+
+        <span className="editorial-divider">|</span>
+
+        {/* 4. Nút cài đặt (icon Gear) */}
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          className="editorial-settings-btn"
+          title="Thông số & Cấu hình Kỹ thuật"
+          aria-label="Cài đặt kỹ thuật"
+        >
+          <Settings size={18} />
         </button>
       </div>
     </header>

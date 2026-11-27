@@ -37,3 +37,36 @@ class ErrorResponse(BaseModel):
     error: str = Field(..., description="Mã lỗi")
     message: str = Field(..., description="Thông báo lỗi chi tiết dễ hiểu")
 
+class UserPreferencesResponse(BaseModel):
+    user_id: str
+    email: str
+    email_alerts_enabled: bool
+    updated_at: Optional[str] = None
+
+class UpdatePreferencesRequest(BaseModel):
+    email_alerts_enabled: bool
+
+class TestEmailResponse(BaseModel):
+    success: bool
+    mode: str = Field("real", description="'real' hoặc 'mock'")
+    status: str = Field("accepted", description="'accepted' (SMTP xác nhận) hoặc 'simulated' (SMTP Mock)")
+    message: str
+    recipient: str
+    cooldown_seconds: int = 0
+
+class ResetSessionRequest(BaseModel):
+    session_id: str
+
+class EmailDispatchItem(BaseModel):
+    event_id: str
+    session_id: str
+    recipient_email: str
+    status: str  # 'pending', 'sent', 'failed'
+    mode: str = "real"  # 'real' | 'mock' | 'error'
+    error_message: Optional[str] = None
+    sent_at: Optional[str] = None
+    created_at: str
+
+class SessionDispatchesResponse(BaseModel):
+    session_id: str
+    dispatches: List[EmailDispatchItem] = Field(default_factory=list)

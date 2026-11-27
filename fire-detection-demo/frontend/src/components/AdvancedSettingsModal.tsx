@@ -1,6 +1,7 @@
-import React from 'react';
-import { X, Cpu, Server, Sliders, CheckCircle, AlertCircle } from 'lucide-react';
-import type { ModelStatus, BackendHealth } from '../types';
+import React, { useState, useEffect } from 'react';
+import { X, Cpu, Server, Sliders, CheckCircle, AlertCircle, RefreshCw, Sparkles, Mail, Send, Check, LogIn, LogOut, Info } from 'lucide-react';
+import type { ModelStatus, BackendHealth, UserProfile, UserEmailPreferences, TestEmailFeedback } from '../types';
+import { getAvailableModels, switchModel, type ModelListItem } from '../services/api';
 
 interface AdvancedSettingsModalProps {
   isOpen: boolean;
@@ -15,6 +16,19 @@ interface AdvancedSettingsModalProps {
   onChangeTolerance: (ms: number) => void;
   showLabels: boolean;
   onToggleShowLabels: () => void;
+  onRefreshStatus?: () => void;
+  onModelSwitched?: () => void;
+  isMockMode: boolean;
+  onToggleMockMode: (val: boolean) => void;
+  user?: UserProfile | null;
+  userPreferences?: UserEmailPreferences | null;
+  onToggleEmailAlerts?: (enabled: boolean) => void;
+  onSendTestEmail?: () => Promise<void>;
+  onSignOut?: () => void;
+  onOpenAuth?: () => void;
+  testEmailCooldown?: number;
+  isSendingTestEmail?: boolean;
+  testEmailFeedback?: TestEmailFeedback | null;
 }
 
 export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
@@ -30,18 +44,81 @@ export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
   onChangeTolerance,
   showLabels,
   onToggleShowLabels,
+  onRefreshStatus,
+  onModelSwitched,
+  isMockMode,
+  onToggleMockMode,
+  user,
+  userPreferences,
+  onToggleEmailAlerts,
+  onSendTestEmail,
+  onSignOut,
+  onOpenAuth,
+  testEmailCooldown = 0,
+  isSendingTestEmail = false,
+  testEmailFeedback = null,
 }) => {
+  const [modelList, setModelList] = useState<ModelListItem[]>([]);
+  const [isSwitching, setIsSwitching] = useState<boolean>(false);
+  const [switchFeedback, setSwitchFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      void getAvailableModels()
+        .then((res) => setModelList(res.models))
+        .catch(() => {});
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  const handleSelectModel = async (modelPath: string) => {
+    setIsSwitching(true);
+    setSwitchFeedback('Đang nạp mô hình vào bộ nhớ...');
+    if (onModelSwitched) onModelSwitched();
+    try {
+      await switchModel(modelPath);
+      setSwitchFeedback('Chuyển đổi mô hình thành công!');
+      if (onModelSwitched) onModelSwitched();
+      if (onRefreshStatus) onRefreshStatus();
+      setTimeout(() => setSwitchFeedback(null), 3000);
+    } catch (err: any) {
+      setSwitchFeedback(`Lỗi: ${err.message || 'Không thể đổi model'}`);
+    } finally {
+      setIsSwitching(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-settings-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
           <div className="modal-title-group">
             <Sliders size={20} className="text-amber-500" />
-            <h3 className="modal-title">Thông số & Cấu hình Kỹ thuật</h3>
+            <h3 id="modal-settings-title" className="modal-title">Thông số & Cấu hình Kỹ thuật</h3>
           </div>
-          <button type="button" onClick={onClose} className="icon-subtle-btn">
+          <button
+            type="button"
+            onClick={onClose}
+            className="icon-subtle-btn"
+            aria-label="Đóng bảng cài đặt"
+          >
             <X size={18} />
           </button>
         </div>
@@ -85,6 +162,67 @@ export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
                 <span className="info-val font-mono">{health?.uptime_seconds ? `${Math.round(health.uptime_seconds)}s` : '--'}</span>
               </div>
             </div>
+
+            {/* Chuyển đổi mô hình nhanh */}
+            <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: '#334155' }}>
+                  Đổi sang checkpoint khác ({modelList.length} weights có sẵn):
+                </span>
+                {isSwitching && (
+                  <span style={{ fontSize: '12px', color: '#f97316', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <RefreshCw size={12} className="animate-spin" /> Đang nạp...
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '6px' }}>
+                {modelList.map((m) => {
+                  const isCurrent = modelStatus?.model_path?.toLowerCase().includes(m.filename.toLowerCase());
+                  return (
+                    <button
+                      key={m.filename}
+                      type="button"
+                      disabled={isSwitching || isCurrent}
+                      onClick={() => handleSelectModel(m.path)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '7px 12px',
+                        borderRadius: '6px',
+                        border: isCurrent ? '1.5px solid #10b981' : '1px solid #cbd5e1',
+                        background: isCurrent ? '#ecfdf5' : '#ffffff',
+                        cursor: isCurrent ? 'default' : 'pointer',
+                        textAlign: 'left',
+                        fontSize: '13px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontWeight: 600, color: isCurrent ? '#065f46' : '#1e293b' }}>
+                          {m.filename}
+                        </span>
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>({m.size_mb} MB)</span>
+                      </div>
+                      {isCurrent ? (
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: '#059669', background: '#d1fae5', padding: '2px 8px', borderRadius: '4px' }}>
+                          Đang dùng
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '12px', color: '#f97316', fontWeight: 500 }}>
+                          Chọn model này &rarr;
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {switchFeedback && (
+                <div style={{ marginTop: '8px', fontSize: '12px', color: switchFeedback.startsWith('Lỗi') ? '#ef4444' : '#059669' }}>
+                  {switchFeedback}
+                </div>
+              )}
+            </div>
+
             {modelStatus?.error_message && (
               <div className="settings-note-banner">
                 {modelStatus.error_message}
@@ -176,6 +314,157 @@ export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
                 <span>Hiển thị nhãn tên lớp và tỷ lệ phần trăm trên Bounding Box</span>
               </label>
             </div>
+          </div>
+
+          {/* Nhóm 3: Chế độ Kiểm thử Ngoại tuyến (Mock Data) */}
+          <div className="settings-section">
+            <h4 className="settings-section-title">
+              <Sparkles size={16} />
+              <span>Chế độ Kiểm thử Ngoại tuyến (Mock Data)</span>
+            </h4>
+            <div className="setting-checkbox-item">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={isMockMode}
+                  onChange={(e) => onToggleMockMode(e.target.checked)}
+                  className="checkbox-input"
+                />
+                <span className="font-medium text-slate-800">
+                  Bật dữ liệu mô phỏng cố định (Mock)
+                </span>
+              </label>
+              <p className="setting-hint" style={{ marginTop: '4px', paddingLeft: '24px' }}>
+                Chỉ nên bật khi cần kiểm thử luồng giao diện mà không có kết nối đến máy chủ AI backend.
+              </p>
+            </div>
+          </div>
+
+          {/* Nhóm 4: Cảnh báo qua Email (Supabase Auth & SMTP) */}
+          <div className="settings-section">
+            <h4 className="settings-section-title">
+              <Mail size={16} />
+              <span>Cảnh báo qua Email (Supabase & SMTP)</span>
+            </h4>
+
+            <div className="setting-checkbox-item">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={Boolean(user && userPreferences?.email_alerts_enabled)}
+                  onChange={(e) => {
+                    if (!user) {
+                      if (onOpenAuth) onOpenAuth();
+                    } else {
+                      if (onToggleEmailAlerts) onToggleEmailAlerts(e.target.checked);
+                    }
+                  }}
+                  className="checkbox-input"
+                />
+                <span className="font-medium text-slate-800">
+                  Nhận cảnh báo lửa qua email
+                </span>
+              </label>
+              <p className="setting-hint" style={{ marginTop: '4px', paddingLeft: '24px' }}>
+                Tự động gửi email thông báo khi phát hiện sự kiện lửa kéo dài trên Video tải lên hoặc Webcam.
+              </p>
+            </div>
+
+            {user ? (
+              <div className="email-account-panel">
+                <div className="email-account-info-row">
+                  <div className="email-info-left">
+                    <span className="info-key">Hộp thư nhận cảnh báo:</span>
+                    <span className="email-highlight-chip">{user.email}</span>
+                  </div>
+                  {onSignOut && (
+                    <button
+                      type="button"
+                      className="email-signout-btn"
+                      onClick={onSignOut}
+                      title="Đăng xuất tài khoản hiện tại"
+                    >
+                      <LogOut size={13} />
+                      <span>Đăng xuất</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="test-email-action-row">
+                  <button
+                    type="button"
+                    className="test-email-btn"
+                    disabled={isSendingTestEmail || (testEmailCooldown !== undefined && testEmailCooldown > 0)}
+                    onClick={onSendTestEmail}
+                    title="Gửi thư thử nghiệm kiểm tra kết nối SMTP độc lập với model"
+                  >
+                    {isSendingTestEmail ? (
+                      <>
+                        <RefreshCw size={13} className="animate-spin" />
+                        <span>Đang chờ gửi...</span>
+                      </>
+                    ) : testEmailCooldown && testEmailCooldown > 0 ? (
+                      <>
+                        <Send size={13} />
+                        <span>Gửi lại ({testEmailCooldown}s)</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send size={13} />
+                        <span>Gửi email thử</span>
+                      </>
+                    )}
+                  </button>
+                  <span className="test-email-hint">
+                    Kiểm tra đường gửi thư SMTP độc lập với AI model (cooldown 60s).
+                  </span>
+                </div>
+
+                {testEmailFeedback && (
+                  <div
+                    className={`test-email-feedback ${
+                      testEmailFeedback.type === 'error'
+                        ? 'error'
+                        : testEmailFeedback.type === 'simulated'
+                        ? 'mock'
+                        : testEmailFeedback.type === 'pending'
+                        ? 'pending'
+                        : 'success'
+                    }`}
+                  >
+                    {testEmailFeedback.type === 'error' && (
+                      <AlertCircle size={14} className="shrink-0" />
+                    )}
+                    {testEmailFeedback.type === 'simulated' && (
+                      <Info size={14} className="shrink-0" />
+                    )}
+                    {testEmailFeedback.type === 'pending' && (
+                      <RefreshCw size={14} className="shrink-0 animate-spin" />
+                    )}
+                    {testEmailFeedback.type === 'accepted' && (
+                      <Check size={14} className="shrink-0" />
+                    )}
+                    <span>{testEmailFeedback.message}</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="email-guest-callout">
+                <div className="guest-callout-text">
+                  Bạn đang dùng chế độ Khách. Đăng nhập để bật nhận cảnh báo qua email.
+                </div>
+                {onOpenAuth && (
+                  <button
+                    type="button"
+                    className="guest-login-btn"
+                    onClick={onOpenAuth}
+                  >
+                    <LogIn size={14} />
+                    <span>Đăng nhập</span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

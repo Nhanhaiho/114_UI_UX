@@ -1,22 +1,41 @@
 import io
 import time
+import asyncio
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
+from pydantic import BaseModel
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from PIL import Image, UnidentifiedImageError
 
-from app.config import settings
+from app.config import settings, ENV_FILE_PATH
 from app.schemas import (
     HealthResponse,
     ModelStatusResponse,
     InferenceResponse,
     ErrorResponse,
+    UserPreferencesResponse,
+    UpdatePreferencesRequest,
+    TestEmailResponse,
+    ResetSessionRequest,
+    SessionDispatchesResponse,
+    EmailDispatchItem,
 )
-from app.detector import YoloSRCDetector, MockDetector
+from app.detector import YoloSRCDetector, MockDetector, update_env_model_path
+from app.auth import get_current_user, get_optional_user, AuthenticatedUser
+from app.database import (
+    get_user_preferences,
+    set_user_preferences,
+    can_send_test_email,
+    record_test_email_sent,
+    get_user_session_dispatches,
+)
+from app.smtp_service import send_test_email
+from app.fire_tracker import backend_fire_tracker
 
 # Cấu hình logging
 logging.basicConfig(
@@ -34,12 +53,37 @@ mock_detector: Optional[MockDetector] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global real_detector, mock_detector
+    logger.info(
+        "Cấu hình khởi động: env_file=%s (tồn tại=%s) | SMTP_MOCK=%s | SMTP_ENABLED=%s | SupabaseAuth=%s | SupabaseDB=%s",
+        ENV_FILE_PATH,
+        ENV_FILE_PATH.exists(),
+        settings.SMTP_MOCK,
+        settings.SMTP_ENABLED,
+        settings.is_supabase_auth_configured,
+        settings.is_supabase_db_configured,
+    )
     logger.info("Khởi động FastAPI server, đang chuẩn bị detector...")
     # Nạp YoloSRCDetector một lần duy nhất khi khởi động
     real_detector = YoloSRCDetector()
     mock_detector = MockDetector()
     logger.info(f"Detector khởi tạo xong. Trạng thái mô hình thật: {'SẴN SÀNG' if real_detector.is_ready() else 'CHƯA NẠP'}")
+
+    # Background task tự động theo dõi file .env mỗi 1.5 giây
+    stop_event = asyncio.Event()
+
+    async def env_watcher():
+        while not stop_event.is_set():
+            try:
+                if real_detector and real_detector.check_env_update():
+                    backend_fire_tracker.reset_all_sessions()
+            except Exception as e:
+                logger.debug(f"Lỗi env_watcher: {e}")
+            await asyncio.sleep(1.5)
+
+    watcher_task = asyncio.create_task(env_watcher())
     yield
+    stop_event.set()
+    watcher_task.cancel()
     logger.info("Đang tắt FastAPI server...")
 
 
@@ -84,6 +128,162 @@ async def get_model_status():
     return real_detector.get_status()
 
 
+class SwitchModelRequest(BaseModel):
+    model_path: str
+
+
+@app.get("/api/model/list")
+async def list_available_models():
+    """Liệt kê danh sách các file checkpoint .pt có sẵn trong thư mục weights/"""
+    weights_dir = Path("weights")
+    models = []
+    if weights_dir.exists():
+        for p in sorted(weights_dir.glob("*.pt")):
+            models.append({
+                "filename": p.name,
+                "path": f"weights/{p.name}",
+                "size_mb": round(p.stat().st_size / (1024 * 1024), 2),
+            })
+    current_name = real_detector._model_path.name if (real_detector and real_detector._model_path) else ""
+    return {
+        "current_model": current_name,
+        "models": models,
+    }
+
+
+@app.post("/api/model/switch", response_model=ModelStatusResponse)
+async def switch_model_endpoint(req: SwitchModelRequest):
+    """Đổi model đang chạy ngay lập tức và đồng bộ vào file .env"""
+    if not real_detector:
+        raise HTTPException(status_code=503, detail="Detector chưa khởi tạo")
+
+    target_path = Path(req.model_path)
+    if not target_path.exists():
+        target_path = Path("weights") / req.model_path
+        if not target_path.exists():
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy file checkpoint: {req.model_path}")
+
+    try:
+        normalized_path = str(target_path).replace("\\", "/")
+        await asyncio.to_thread(real_detector.switch_model, normalized_path)
+        update_env_model_path(normalized_path)
+        backend_fire_tracker.reset_all_sessions()
+        return real_detector.get_status()
+    except Exception as e:
+        logger.error(f"Lỗi khi chuyển đổi model: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Lỗi khi chuyển đổi model: {str(e)}")
+
+
+# =============================================================================
+# ENDPOINTS QUẢN LÝ TÙY CHỌN EMAIL & XÁC NHẬN CẢNH BÁO
+# =============================================================================
+
+@app.get("/api/user/preferences", response_model=UserPreferencesResponse)
+async def get_preferences_endpoint(user: AuthenticatedUser = Depends(get_current_user)):
+    """Lấy tùy chọn nhận cảnh báo qua email của người dùng đã xác thực"""
+    prefs = await get_user_preferences(user.id)
+    return UserPreferencesResponse(
+        user_id=user.id,
+        email=user.email,
+        email_alerts_enabled=bool(prefs.get("email_alerts_enabled", False)),
+        updated_at=prefs.get("updated_at"),
+    )
+
+
+@app.post("/api/user/preferences", response_model=UserPreferencesResponse)
+async def update_preferences_endpoint(
+    req: UpdatePreferencesRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+):
+    """Bật/tắt tùy chọn nhận cảnh báo lửa qua email"""
+    updated = await set_user_preferences(user.id, user.email, req.email_alerts_enabled)
+    return UserPreferencesResponse(
+        user_id=user.id,
+        email=user.email,
+        email_alerts_enabled=bool(updated.get("email_alerts_enabled", False)),
+        updated_at=updated.get("updated_at"),
+    )
+
+
+@app.post("/api/alerts/test-email", response_model=TestEmailResponse)
+async def test_email_endpoint(user: AuthenticatedUser = Depends(get_current_user)):
+    """
+    Gửi email thử nghiệm độc lập với model, có giới hạn tần suất (cooldown).
+    - Khi SMTP_MOCK=false: bắt buộc tài khoản Supabase đã xác minh email (không dùng mock auth @example.com)
+      và chỉ trả thành công sau khi máy chủ SMTP chấp nhận thư.
+    - Khi SMTP_MOCK=true: trả về trạng thái 'simulated' để UI hiển thị rõ đã mô phỏng.
+    """
+    if not settings.SMTP_MOCK:
+        if user.is_mock:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=(
+                    "Phiên đăng nhập hiện tại đang là Mock Auth (@example.com giả lập), không thể gửi email thật. "
+                    "Hãy cấu hình Supabase Auth trong frontend/.env và backend/.env, sau đó đăng nhập lại bằng email thật."
+                ),
+            )
+        if not user.email_confirmed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Địa chỉ email trên tài khoản Supabase chưa được xác minh. Vui lòng xác thực OTP trước.",
+            )
+
+    can_send, remaining = await can_send_test_email(user.id)
+    if not can_send:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Vui lòng đợi {remaining} giây trước khi gửi lại email thử.",
+        )
+
+    result = await send_test_email(user.email)
+    if not result.success:
+        is_config_err = (result.error or "").startswith("ConfigError")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST if is_config_err else status.HTTP_502_BAD_GATEWAY,
+            detail=result.message,
+        )
+
+    record_test_email_sent(user.id)
+    return TestEmailResponse(
+        success=True,
+        mode=result.mode,
+        status=result.status,
+        message=result.message,
+        recipient=user.email,
+        cooldown_seconds=settings.TEST_EMAIL_COOLDOWN_SECONDS,
+    )
+
+
+@app.post("/api/alerts/reset-session")
+async def reset_session_endpoint(req: ResetSessionRequest):
+    """Xóa các ứng viên đang theo dõi dở dang khi tua video, đổi nguồn hoặc dừng AI"""
+    backend_fire_tracker.reset_session(req.session_id)
+    return {"status": "ok", "message": f"Đã reset phiên theo dõi {req.session_id}"}
+
+
+@app.get("/api/alerts/session-dispatches", response_model=SessionDispatchesResponse)
+async def get_session_dispatches_endpoint(
+    session_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+):
+    """Lấy danh sách trạng thái gửi email thuộc phiên của người dùng (bảo đảm phân quyền)"""
+    dispatches = await get_user_session_dispatches(user.id, session_id)
+    items = [
+        EmailDispatchItem(
+            event_id=d["event_id"],
+            session_id=d["session_id"],
+            recipient_email=d["recipient_email"],
+            status=d["status"],
+            mode=d.get("mode", "real"),
+            error_message=d.get("error_message"),
+            sent_at=d.get("sent_at"),
+            created_at=d["created_at"],
+        )
+        for d in dispatches
+    ]
+    return SessionDispatchesResponse(session_id=session_id, dispatches=items)
+
+
 @app.post(
     "/api/infer/image",
     response_model=InferenceResponse,
@@ -100,7 +300,9 @@ async def infer_image(
     frame_id: Optional[int] = Form(None),
     timestamp_ms: Optional[float] = Form(None),
     confidence_threshold: Optional[float] = Form(None),
+    source_type: Optional[str] = Form("image", description="Nguồn: 'image', 'video' hoặc 'camera'"),
     use_mock: bool = Form(False, description="Chủ động bật chế độ xem thử mẫu khi chưa có checkpoint thật"),
+    user: Optional[AuthenticatedUser] = Depends(get_optional_user),
 ):
     """
     Điểm cuối suy luận dùng chung cho ảnh tĩnh và từng frame video/webcam.
@@ -118,9 +320,8 @@ async def infer_image(
     # 2. Giải mã hình ảnh bằng PIL
     try:
         image = Image.open(io.BytesIO(content))
-        # Nạp dữ liệu ảnh vào bộ nhớ để xác nhận giải mã thành công
         image.load()
-    except (UnidentifiedImageError, Exception) as e:
+    except (UnidentifiedImageError, Exception):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tệp tải lên không phải là ảnh hợp lệ hoặc dữ liệu bị hỏng.",
@@ -134,6 +335,9 @@ async def infer_image(
     )
 
     # 3. Chọn bộ nhận diện (Thật hoặc Mô phỏng khi được yêu cầu rõ ràng)
+    epoch_before = real_detector.model_epoch if real_detector else 0
+    model_short_name = real_detector.model_filename if real_detector else "YOLO26n"
+
     if use_mock:
         if not mock_detector:
             raise HTTPException(
@@ -152,18 +356,38 @@ async def infer_image(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 content={
                     "error": "model_not_ready",
-                    "message": error_msg or "Mô hình chưa sẵn sàng. Vui lòng đặt checkpoint vào weights/best.pt hoặc sử dụng chế độ 'Xem thử giao diện'.",
+                    "message": error_msg or "Mô hình chưa sẵn sàng. Vui lòng đặt checkpoint vào weights/ hoặc sử dụng chế độ 'Xem thử giao diện'.",
                 },
             )
-        
+
         try:
-            detections, inference_ms, mode = real_detector.infer(image, conf_thresh)
+            detections, inference_ms, mode = await asyncio.to_thread(
+                real_detector.infer, image, conf_thresh
+            )
         except Exception as e:
             logger.error(f"Lỗi trong quá trình suy luận: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Lỗi suy luận mô hình: {str(e)}",
             )
+
+    # 4. Kích hoạt xác nhận sự kiện và gửi email bất đồng bộ trên backend (chỉ áp dụng với suy luận thật trên Video/Webcam)
+    model_unchanged = real_detector is not None and real_detector.model_epoch == epoch_before
+    if mode == "real" and model_unchanged and source_type in ("video", "camera") and session_id:
+        asyncio.create_task(
+            backend_fire_tracker.process_frame(
+                session_id=session_id,
+                detections=[d.model_dump() for d in detections],
+                timestamp_ms=timestamp_ms if timestamp_ms is not None else (time.time() * 1000.0),
+                source_type=source_type,
+                model_name=model_short_name,
+                user_id=user.id if user else None,
+                user_email=user.email if user else None,
+                is_mock=use_mock,
+                user_email_confirmed=user.email_confirmed if user else False,
+                user_is_mock=user.is_mock if user else False,
+            )
+        )
 
     return InferenceResponse(
         session_id=session_id,
@@ -176,4 +400,3 @@ async def infer_image(
         mode=mode,
         detections=detections,
     )
-
