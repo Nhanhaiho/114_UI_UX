@@ -30,8 +30,12 @@ def make_det(cls_name="fire", conf=0.85, box=None):
 
 
 @pytest.fixture(autouse=True)
-def clean_database():
-    """Làm sạch bộ nhớ trước mỗi bài test"""
+def clean_database(monkeypatch):
+    """Làm sạch bộ nhớ và cách ly khỏi Supabase mạng ngoài trước mỗi bài test"""
+    monkeypatch.setattr(settings, "SUPABASE_URL", "")
+    monkeypatch.setattr(settings, "SUPABASE_ANON_KEY", "")
+    monkeypatch.setattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "")
+    monkeypatch.setattr(settings, "SUPABASE_JWT_SECRET", "")
     _in_memory_dispatches.clear()
     _in_memory_preferences.clear()
     _in_memory_test_cooldowns.clear()
