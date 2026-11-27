@@ -102,6 +102,7 @@ export class FireAlertTracker {
   private alerts: FireAlertEvent[] = [];
   private candidateIdCounter = 0;
   private alertIdCounter = 0;
+  private lastModelKey: string | undefined = undefined;
 
   private readonly triggerConfidence: number;
   private readonly continueConfidence: number;
@@ -123,7 +124,7 @@ export class FireAlertTracker {
   public processFrame(
     detections: DetectionItem[],
     timestampMs: number,
-    meta: { isMock?: boolean; isVideo?: boolean } = {}
+    meta: { isMock?: boolean; isVideo?: boolean; modelKey?: string } = {}
   ): {
     activeAlerts: FireAlertEvent[];
     newAlerts: FireAlertEvent[];
@@ -132,6 +133,14 @@ export class FireAlertTracker {
   } {
     const isMock = !!meta.isMock;
     const isVideo = meta.isVideo !== false;
+
+    // Nếu đổi checkpoint model giữa chừng -> ngắt toàn bộ ứng viên đang theo dõi từ model cũ
+    if (meta.modelKey !== undefined) {
+      if (this.lastModelKey !== undefined && this.lastModelKey !== meta.modelKey) {
+        this.resetPending();
+      }
+      this.lastModelKey = meta.modelKey;
+    }
 
     // Lọc các detection là Lửa (fire)
     const fireDetections = detections.filter(
@@ -142,7 +151,21 @@ export class FireAlertTracker {
     const newAlerts: FireAlertEvent[] = [];
 
     // 1. Cập nhật các ứng viên (candidates) đang theo dõi
+    // Luôn kiểm tra khoảng ngắt (maxGapMs) TRƯỚC khi ghép box mới để tránh cộng dồn qua khoảng trống dài
     for (const [candId, candidate] of Array.from(this.candidates.entries())) {
+      const gap = timestampMs - candidate.lastSeenMs;
+      if (gap < 0 || gap > this.maxGapMs) {
+        if (candidate.isConfirmed) {
+          const alert = this.alerts.find((a) => a.id === candId);
+          if (alert) {
+            alert.isActive = false;
+            alert.endedAtMs = candidate.lastSeenMs;
+          }
+        }
+        this.candidates.delete(candId);
+        continue;
+      }
+
       // Tìm detection lửa khớp với vùng của candidate (ưu tiên IoU cao nhất và confidence > continueConfidence)
       let bestMatchIdx = -1;
       let highestIoU = -1;

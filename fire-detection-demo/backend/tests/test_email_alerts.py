@@ -16,7 +16,7 @@ from app.database import (
     _in_memory_test_cooldowns,
 )
 from app.smtp_service import send_test_email
-from app.auth import verify_supabase_token, AuthenticatedUser, get_current_user
+from app.auth import verify_supabase_token, AuthenticatedUser, get_current_user, clear_auth_cache
 from app.main import app
 
 
@@ -39,6 +39,7 @@ def clean_database(monkeypatch):
     _in_memory_dispatches.clear()
     _in_memory_preferences.clear()
     _in_memory_test_cooldowns.clear()
+    clear_auth_cache()
 
 
 def test_single_isolated_frame_generates_zero_emails():
@@ -238,6 +239,7 @@ def test_smtp_error_handling_marks_dispatch_failed():
 
         with patch("app.fire_tracker.send_fire_alert_email", side_effect=failing_send):
             await tracker.process_frame("sess-fail", [make_det("fire", 0.5)], 0.0, "camera", "best.pt", user_id, user_email)
+            await tracker.process_frame("sess-fail", [make_det("fire", 0.5)], 300.0, "camera", "best.pt", user_id, user_email)
             await tracker.process_frame("sess-fail", [make_det("fire", 0.5)], 600.0, "camera", "best.pt", user_id, user_email)
             await asyncio.sleep(0.05)
 
@@ -270,6 +272,7 @@ def test_multi_tenancy_user_a_and_b_isolation():
         with patch("app.fire_tracker.send_fire_alert_email", side_effect=fake_send):
             # Phiên của User A
             await tracker.process_frame("session-A", [make_det("fire", 0.5)], 0.0, "video", "best.pt", user_a, email_a)
+            await tracker.process_frame("session-A", [make_det("fire", 0.5)], 300.0, "video", "best.pt", user_a, email_a)
             await tracker.process_frame("session-A", [make_det("fire", 0.5)], 600.0, "video", "best.pt", user_a, email_a)
             await asyncio.sleep(0.05)
 
@@ -493,6 +496,7 @@ def test_video_fire_alert_uses_same_smtp_service_for_mock_and_real(monkeypatch):
         # Kiểm tra chế độ SMTP_MOCK=true trên video alert
         monkeypatch.setattr(settings, "SMTP_MOCK", True)
         await tracker.process_frame("sess-shared-mock", [make_det("fire", 0.6)], 0.0, "video", "best.pt", user_id, user_email)
+        await tracker.process_frame("sess-shared-mock", [make_det("fire", 0.6)], 300.0, "video", "best.pt", user_id, user_email)
         await tracker.process_frame("sess-shared-mock", [make_det("fire", 0.6)], 600.0, "video", "best.pt", user_id, user_email)
         await asyncio.sleep(0.08)
 
@@ -503,5 +507,82 @@ def test_video_fire_alert_uses_same_smtp_service_for_mock_and_real(monkeypatch):
         assert dispatches[0]["recipient_email"] == user_email
 
     asyncio.run(_test())
+
+
+def test_tracker_rejects_excessive_gap_0ms_to_1200ms():
+    """Khoảng ngắt 0ms -> 1200ms vượt max_gap_ms=400ms KHÔNG được cộng dồn xác nhận"""
+    async def _test():
+        tracker = BackendFireTracker(
+            trigger_confidence=0.30,
+            continue_confidence=0.20,
+            confirm_duration_ms=500.0,
+            max_gap_ms=400.0,
+        )
+        events1 = await tracker.process_frame("sess-gap", [make_det("fire", 0.7)], 0.0, "video", "plain.pt")
+        assert len(events1) == 0
+
+        events2 = await tracker.process_frame("sess-gap", [make_det("fire", 0.7)], 1200.0, "video", "plain.pt")
+        assert len(events2) == 0
+
+        # Tiếp tục duy trì liên tục từ 1200ms -> 1450ms -> 1750ms mới xác nhận đúng 1 sự kiện
+        await tracker.process_frame("sess-gap", [make_det("fire", 0.7)], 1450.0, "video", "plain.pt")
+        events3 = await tracker.process_frame("sess-gap", [make_det("fire", 0.7)], 1750.0, "video", "plain.pt")
+        assert len(events3) == 1
+
+    asyncio.run(_test())
+
+
+def test_tracker_does_not_merge_frames_across_checkpoint_switch():
+    """Đổi checkpoint giữa chừng không được gộp frame của hai model thành cùng cảnh báo"""
+    async def _test():
+        tracker = BackendFireTracker(
+            trigger_confidence=0.30,
+            continue_confidence=0.20,
+            confirm_duration_ms=500.0,
+            max_gap_ms=400.0,
+        )
+        await tracker.process_frame("sess-switch", [make_det("fire", 0.7)], 0.0, "video", "model_a.pt")
+        await tracker.process_frame("sess-switch", [make_det("fire", 0.7)], 300.0, "video", "model_a.pt")
+
+        # Frame tại t=600ms đến từ model_b.pt -> reset ứng viên model_a, không confirm ở 600ms
+        events_switch = await tracker.process_frame("sess-switch", [make_det("fire", 0.7)], 600.0, "video", "model_b.pt")
+        assert len(events_switch) == 0
+
+        # Nếu gọi reset_all_sessions() cũng phải xóa sạch mọi phiên theo dõi dở
+        tracker.reset_all_sessions()
+        assert len(tracker.sessions) == 0
+
+    asyncio.run(_test())
+
+
+def test_supabase_token_cache_avoids_repeated_network_calls_per_frame(monkeypatch):
+    """Xác thực frame liên tiếp cùng token hợp lệ dùng TTL cache, không gọi HTTPS lặp lại từng frame"""
+    monkeypatch.setattr(settings, "SUPABASE_URL", "https://myproj.supabase.co")
+    monkeypatch.setattr(settings, "SUPABASE_ANON_KEY", "real-anon-key-123")
+    monkeypatch.setattr(settings, "ALLOW_MOCK_AUTH", None)
+
+    async def _test():
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "id": "55555555-5555-5555-5555-555555555555",
+            "email": "cached.user@gmail.com",
+            "email_confirmed_at": "2026-11-25T03:00:00Z",
+        }
+        mock_client = AsyncMock()
+        mock_client.is_closed = False
+        mock_client.get.return_value = mock_response
+
+        with patch("app.auth._get_auth_client", return_value=mock_client):
+            tok = "eyJhbGciOiJIUzI1NiJ9.cached.frame.token"
+            for _ in range(5):
+                u = await verify_supabase_token(tok, use_cache=True)
+                assert u is not None
+                assert u.email == "cached.user@gmail.com"
+            # Chỉ gọi Supabase /auth/v1/user đúng 1 lần cho cả 5 frame!
+            assert mock_client.get.call_count == 1
+
+    asyncio.run(_test())
+
 
 

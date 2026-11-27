@@ -17,6 +17,7 @@ interface AdvancedSettingsModalProps {
   showLabels: boolean;
   onToggleShowLabels: () => void;
   onRefreshStatus?: () => void;
+  onModelSwitched?: () => void;
   isMockMode: boolean;
   onToggleMockMode: (val: boolean) => void;
   user?: UserProfile | null;
@@ -44,6 +45,7 @@ export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
   showLabels,
   onToggleShowLabels,
   onRefreshStatus,
+  onModelSwitched,
   isMockMode,
   onToggleMockMode,
   user,
@@ -81,9 +83,11 @@ export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
   const handleSelectModel = async (modelPath: string) => {
     setIsSwitching(true);
     setSwitchFeedback('Đang nạp mô hình vào bộ nhớ...');
+    if (onModelSwitched) onModelSwitched();
     try {
       await switchModel(modelPath);
       setSwitchFeedback('Chuyển đổi mô hình thành công!');
+      if (onModelSwitched) onModelSwitched();
       if (onRefreshStatus) onRefreshStatus();
       setTimeout(() => setSwitchFeedback(null), 3000);
     } catch (err: any) {

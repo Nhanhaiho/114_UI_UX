@@ -49,6 +49,7 @@ class YoloSRCDetector(DetectorAdapter):
         self._model_name: Optional[str] = None
         self._classes: Dict[int, str] = {}
         self._lock = threading.Lock()
+        self._model_epoch: int = 1
         
         # Thiết bị
         import torch
@@ -73,18 +74,17 @@ class YoloSRCDetector(DetectorAdapter):
             pass
         return 0.0
 
-    def check_env_update(self):
-        """Kiểm tra xem file .env có bị chỉnh sửa không. Nếu có, tự động nạp lại model mà không cần restart server."""
+    def check_env_update(self) -> bool:
+        """Kiểm tra xem file .env có bị chỉnh sửa không. Nếu có, tự động nạp lại model. Trả về True nếu đã đổi."""
         try:
             current_mtime = self._get_env_mtime()
             if current_mtime > self._last_env_mtime:
                 self._last_env_mtime = current_mtime
                 if not self._env_file_path.exists():
-                    return
-                # Đọc nội dung file .env
+                    return False
                 with open(self._env_file_path, "r", encoding="utf-8") as f:
                     lines = f.readlines()
-                
+
                 new_model_path_str = None
                 for line in lines:
                     line = line.strip()
@@ -95,22 +95,32 @@ class YoloSRCDetector(DetectorAdapter):
                         if val:
                             new_model_path_str = val
                             break
-                
+
                 if new_model_path_str:
                     new_path = Path(new_model_path_str)
-                    # Nếu tên file hoặc đường dẫn thay đổi
                     if new_path.name != self._model_path.name:
                         logger.info(f"[Auto-Reload] Phát hiện file .env thay đổi! Đang tự động đổi model: {self._model_path.name} -> {new_path.name}")
                         self.switch_model(str(new_path))
+                        return True
         except Exception as e:
             logger.error(f"Lỗi khi kiểm tra cập nhật file .env: {e}")
+        return False
+
+    @property
+    def model_epoch(self) -> int:
+        return self._model_epoch
+
+    @property
+    def model_filename(self) -> str:
+        return self._model_path.name if self._model_path else "YOLO26n"
 
     def switch_model(self, new_model_path: str):
-        """Nạp động model mới trong bộ nhớ GPU/CPU"""
+        """Nạp động model mới trong bộ nhớ GPU/CPU và tăng epoch để loại bỏ frame model cũ"""
         with self._lock:
             self._model_path = Path(new_model_path)
+            self._model_epoch += 1
             self._load_model()
-            logger.info(f"Đã nạp model mới thành công: {self._model_name} (Sẵn sàng: {self._is_ready})")
+            logger.info(f"Đã nạp model mới thành công: {self._model_name} (epoch={self._model_epoch}, Sẵn sàng: {self._is_ready})")
 
     def _setup_custom_modules(self):
         """Thêm thư mục chứa mã nguồn SRC vào sys.path để PyTorch unpickling nhận diện được module"""
@@ -228,7 +238,6 @@ class YoloSRCDetector(DetectorAdapter):
         )
 
     def infer(self, image: Image.Image, conf_threshold: float) -> Tuple[List[DetectionItem], float, str]:
-        self.check_env_update()
         if not self._is_ready or self._model is None:
             raise RuntimeError(self._error_message or "Mô hình chưa sẵn sàng")
 

@@ -59,7 +59,6 @@ export function App() {
   const [isSampleAnalyzed, setIsSampleAnalyzed] = useState<boolean>(false);
   const currentBlobRef = useRef<Blob | File | null>(null);
 
-  const [, setVideoFile] = useState<File | null>(null);
   const [videoSrc, setVideoSrc] = useState<string | null>('/samples/sample_fire.mp4');
 
   // Webcam Hook
@@ -68,8 +67,6 @@ export function App() {
 
   // 3. Trạng thái Trình phát Video
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [, setCurrentTime] = useState<number>(0);
-  const [, setDuration] = useState<number>(0);
   const [playbackRate, setPlaybackRate] = useState<number>(1.0);
   const [isDetectionActive, setIsDetectionActive] = useState<boolean>(true);
 
@@ -112,6 +109,34 @@ export function App() {
   // Bộ tính FPS thực tế
   const fpsFrameCountRef = useRef<number>(0);
   const fpsWindowStartRef = useRef<number>(0);
+  const prevModelPathRef = useRef<string | null>(null);
+
+  // Hủy request đang chờ và xóa trạng thái theo dõi dở (dùng chung khi tua, tắt AI, đổi nguồn, đổi model)
+  const abortAndResetPendingTracking = useCallback(() => {
+    generationIdRef.current += 1;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    isInferringRef.current = false;
+    fpsFrameCountRef.current = 0;
+    fpsWindowStartRef.current = 0;
+    trackerRef.current.resetPending();
+    setActiveAlert(null);
+    setDetections([]);
+    void resetAlertSession(sessionIdRef.current);
+  }, []);
+
+  // Nếu backend đổi checkpoint (qua modal hoặc auto-reload .env), reset tracker và bỏ request model cũ
+  useEffect(() => {
+    const currentPath = modelStatus?.model_path || null;
+    if (currentPath && prevModelPathRef.current && prevModelPathRef.current !== currentPath) {
+      abortAndResetPendingTracking();
+    }
+    if (currentPath) {
+      prevModelPathRef.current = currentPath;
+    }
+  }, [modelStatus?.model_path, abortAndResetPendingTracking]);
 
   // Nạp cấu hình nhận email khi đăng nhập
   useEffect(() => {
@@ -135,9 +160,10 @@ export function App() {
     return () => clearInterval(timer);
   }, [testEmailCooldown]);
 
-  // Đồng bộ trạng thái gửi email từ backend cho các cảnh báo trong phiên
+  // Đồng bộ trạng thái gửi email từ backend cho các cảnh báo đang chờ gửi trong phiên
+  const hasPendingEmail = alerts.some((alt) => alt.emailDispatchStatus === 'pending');
   useEffect(() => {
-    if (!accessToken || alerts.length === 0 || isMockMode) return;
+    if (!accessToken || !hasPendingEmail || isMockMode) return;
 
     let isSubscribed = true;
     const fetchDispatches = async () => {
@@ -173,7 +199,7 @@ export function App() {
       isSubscribed = false;
       clearInterval(interval);
     };
-  }, [accessToken, alerts.length, isMockMode]);
+  }, [accessToken, hasPendingEmail, isMockMode]);
 
   // Bật/tắt tùy chọn nhận email cảnh báo
   const handleToggleEmailAlerts = useCallback(
@@ -235,19 +261,10 @@ export function App() {
 
   // Tăng generation_id và xóa sạch box cũ
   const resetSessionGeneration = useCallback(() => {
-    generationIdRef.current += 1;
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    isInferringRef.current = false;
-    trackerRef.current.resetPending();
-    setActiveAlert(null);
-    setDetections([]);
+    abortAndResetPendingTracking();
     setAnalysisState('idle');
     setErrorMessage(null);
-    void resetAlertSession(sessionIdRef.current);
-  }, []);
+  }, [abortAndResetPendingTracking]);
 
   // Helper fetch blob từ URL nội bộ
   const fetchSampleBlob = useCallback(async (url: string): Promise<Blob> => {
@@ -431,9 +448,7 @@ export function App() {
       }
 
       const url = URL.createObjectURL(file);
-      setVideoFile(file);
       setVideoSrc(url);
-      setCurrentTime(0);
       setIsPlaying(false);
       setCaption(`Video tải lên: ${file.name}`);
     },
@@ -445,7 +460,6 @@ export function App() {
     resetSessionGeneration();
     setVideoSrc('/samples/sample_fire.mp4');
     setCaption('Video mẫu khói cháy rừng');
-    setCurrentTime(0);
     setIsPlaying(false);
   }, [resetSessionGeneration]);
 
@@ -464,20 +478,15 @@ export function App() {
   );
 
   // Bật/tắt nhận diện AI độc lập
-  const handleToggleDetectionActive = useCallback((active: boolean) => {
-    setIsDetectionActive(active);
-    if (!active) {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
+  const handleToggleDetectionActive = useCallback(
+    (active: boolean) => {
+      setIsDetectionActive(active);
+      if (!active) {
+        abortAndResetPendingTracking();
       }
-      isInferringRef.current = false;
-      trackerRef.current.resetPending();
-      setActiveAlert(null);
-      setDetections([]);
-      void resetAlertSession(sessionIdRef.current);
-    }
-  }, []);
+    },
+    [abortAndResetPendingTracking]
+  );
 
   // Đổi tốc độ phát video
   const handleChangePlaybackRate = useCallback((rate: number) => {
@@ -498,27 +507,6 @@ export function App() {
       document.exitFullscreen?.().catch((err) => console.warn(err));
     }
   }, []);
-
-  // Xử lý tua timeline video
-  const handleSeek = useCallback(
-    (newTime: number) => {
-      generationIdRef.current += 1;
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
-      isInferringRef.current = false;
-      trackerRef.current.resetPending();
-      setActiveAlert(null);
-      setDetections([]);
-      void resetAlertSession(sessionIdRef.current);
-
-      if (videoRef.current && videoRef.current.paused && isDetectionActive) {
-        captureAndInferFrame(newTime * 1000);
-      }
-    },
-    [isDetectionActive]
-  );
 
   // Hàm chụp 1 frame từ <video> và gửi suy luận
   const captureAndInferFrame = useCallback(
@@ -547,12 +535,20 @@ export function App() {
 
       ctx.drawImage(video, 0, 0, targetW, targetH);
 
+      // Khóa ngay trước canvas.toBlob để tránh chồng lấp nhiều frame nếu toBlob mất thời gian
+      isInferringRef.current = true;
+      if (fpsWindowStartRef.current === 0) {
+        fpsWindowStartRef.current = performance.now();
+      }
+
       canvas.toBlob(
         async (blob) => {
-          if (!blob) return;
+          if (!blob) {
+            isInferringRef.current = false;
+            return;
+          }
 
           const currentGen = generationIdRef.current;
-          isInferringRef.current = true;
           frameIdCounterRef.current += 1;
           const currentFrameId = frameIdCounterRef.current;
 
@@ -587,7 +583,11 @@ export function App() {
             const trackerRes = trackerRef.current.processFrame(
               res.detections,
               targetTimeMs,
-              { isMock: isMockMode, isVideo: sourceType === 'video' }
+              {
+                isMock: isMockMode,
+                isVideo: sourceType === 'video',
+                modelKey: modelStatus?.model_path || '',
+              }
             );
 
             // Đánh dấu pending cho cảnh báo mới nếu người dùng bật nhận email
@@ -647,15 +647,36 @@ export function App() {
               setErrorMessage(err.message);
             }
           } finally {
-            isInferringRef.current = false;
-            abortControllerRef.current = null;
+            if (abortControllerRef.current === controller) {
+              isInferringRef.current = false;
+              abortControllerRef.current = null;
+            }
           }
         },
         'image/jpeg',
         0.85
       );
     },
-    [confidenceThreshold, isMockMode, sourceType, timestampToleranceMs, accessToken, userPreferences]
+    [
+      confidenceThreshold,
+      isMockMode,
+      sourceType,
+      timestampToleranceMs,
+      accessToken,
+      userPreferences,
+      modelStatus?.model_path,
+    ]
+  );
+
+  // Xử lý tua timeline video (đặt sau captureAndInferFrame để closure luôn mới)
+  const handleSeek = useCallback(
+    (newTime: number) => {
+      abortAndResetPendingTracking();
+      if (videoRef.current && videoRef.current.paused && isDetectionActive) {
+        captureAndInferFrame(newTime * 1000);
+      }
+    },
+    [isDetectionActive, abortAndResetPendingTracking, captureAndInferFrame]
   );
 
   // Vòng lặp lấy mẫu frame Video hoặc Webcam
@@ -811,12 +832,6 @@ export function App() {
               onVideoSeeked={() => {
                 if (videoRef.current) handleSeek(videoRef.current.currentTime);
               }}
-              onVideoTimeUpdate={() => {
-                if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
-              }}
-              onVideoLoadedMetadata={() => {
-                if (videoRef.current) setDuration(videoRef.current.duration);
-              }}
               onVideoEnded={() => setIsPlaying(false)}
             />
 
@@ -907,6 +922,7 @@ export function App() {
         showLabels={showLabels}
         onToggleShowLabels={() => setShowLabels((prev) => !prev)}
         onRefreshStatus={refreshStatus}
+        onModelSwitched={abortAndResetPendingTracking}
         isMockMode={isMockMode}
         onToggleMockMode={setIsMockMode}
         user={user}

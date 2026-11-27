@@ -74,8 +74,8 @@ async def lifespan(app: FastAPI):
     async def env_watcher():
         while not stop_event.is_set():
             try:
-                if real_detector:
-                    real_detector.check_env_update()
+                if real_detector and real_detector.check_env_update():
+                    backend_fire_tracker.reset_all_sessions()
             except Exception as e:
                 logger.debug(f"Lỗi env_watcher: {e}")
             await asyncio.sleep(1.5)
@@ -165,8 +165,9 @@ async def switch_model_endpoint(req: SwitchModelRequest):
 
     try:
         normalized_path = str(target_path).replace("\\", "/")
-        real_detector.switch_model(normalized_path)
+        await asyncio.to_thread(real_detector.switch_model, normalized_path)
         update_env_model_path(normalized_path)
+        backend_fire_tracker.reset_all_sessions()
         return real_detector.get_status()
     except Exception as e:
         logger.error(f"Lỗi khi chuyển đổi model: {e}", exc_info=True)
@@ -334,6 +335,9 @@ async def infer_image(
     )
 
     # 3. Chọn bộ nhận diện (Thật hoặc Mô phỏng khi được yêu cầu rõ ràng)
+    epoch_before = real_detector.model_epoch if real_detector else 0
+    model_short_name = real_detector.model_filename if real_detector else "YOLO26n"
+
     if use_mock:
         if not mock_detector:
             raise HTTPException(
@@ -352,12 +356,14 @@ async def infer_image(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 content={
                     "error": "model_not_ready",
-                    "message": error_msg or "Mô hình chưa sẵn sàng. Vui lòng đặt checkpoint vào weights/best.pt hoặc sử dụng chế độ 'Xem thử giao diện'.",
+                    "message": error_msg or "Mô hình chưa sẵn sàng. Vui lòng đặt checkpoint vào weights/ hoặc sử dụng chế độ 'Xem thử giao diện'.",
                 },
             )
 
         try:
-            detections, inference_ms, mode = real_detector.infer(image, conf_thresh)
+            detections, inference_ms, mode = await asyncio.to_thread(
+                real_detector.infer, image, conf_thresh
+            )
         except Exception as e:
             logger.error(f"Lỗi trong quá trình suy luận: {e}", exc_info=True)
             raise HTTPException(
@@ -366,12 +372,8 @@ async def infer_image(
             )
 
     # 4. Kích hoạt xác nhận sự kiện và gửi email bất đồng bộ trên backend (chỉ áp dụng với suy luận thật trên Video/Webcam)
-    if mode == "real" and source_type in ("video", "camera") and session_id:
-        model_short_name = (
-            real_detector._model_path.name
-            if (real_detector and real_detector._model_path)
-            else "YOLO26n"
-        )
+    model_unchanged = real_detector is not None and real_detector.model_epoch == epoch_before
+    if mode == "real" and model_unchanged and source_type in ("video", "camera") and session_id:
         asyncio.create_task(
             backend_fire_tracker.process_frame(
                 session_id=session_id,

@@ -113,10 +113,12 @@ class BackendFireTracker:
 
         # Map lưu trữ: session_id -> { cand_id -> BackendFireCandidate }
         self.sessions: Dict[str, Dict[str, BackendFireCandidate]] = {}
+        self.session_models: Dict[str, str] = {}
         self._cand_counter = 0
 
     def reset_session(self, session_id: str) -> None:
         """Xóa các ứng viên đang theo dõi dở dang khi tua video, đổi nguồn hoặc dừng nhận diện"""
+        self.session_models.pop(session_id, None)
         if session_id in self.sessions:
             cand_dict = self.sessions[session_id]
             unconfirmed_ids = [cid for cid, c in cand_dict.items() if not c.is_confirmed]
@@ -125,6 +127,12 @@ class BackendFireTracker:
 
             del self.sessions[session_id]
             logger.info(f"Đã reset trạng thái theo dõi cho phiên: {session_id}")
+
+    def reset_all_sessions(self) -> None:
+        """Xóa toàn bộ phiên theo dõi dở dang (khi đổi checkpoint model)"""
+        self.sessions.clear()
+        self.session_models.clear()
+        logger.info("Đã reset toàn bộ phiên theo dõi do đổi mô hình.")
 
     async def process_frame(
         self,
@@ -147,6 +155,12 @@ class BackendFireTracker:
         if is_mock or source_type not in ("video", "camera"):
             return []
 
+        # Nếu đổi checkpoint trong cùng session_id -> reset ứng viên của model cũ ngay
+        prev_model = self.session_models.get(session_id)
+        if prev_model is not None and prev_model != model_name:
+            self.reset_session(session_id)
+        self.session_models[session_id] = model_name
+
         if session_id not in self.sessions:
             self.sessions[session_id] = {}
 
@@ -160,8 +174,13 @@ class BackendFireTracker:
         matched_detection_indices = set()
         newly_confirmed_events: List[Dict[str, Any]] = []
 
-        # 1. Khớp và cập nhật các ứng viên đang theo dõi
+        # 1. Khớp và cập nhật các ứng viên đang theo dõi (kiểm tra khoảng ngắt TRƯỚC khi ghép box)
         for cand_id, candidate in list(cand_map.items()):
+            gap = timestamp_ms - candidate.last_seen_ms
+            if gap < 0 or gap > self.max_gap_ms:
+                del cand_map[cand_id]
+                continue
+
             best_match_idx = -1
             highest_iou = -1.0
 

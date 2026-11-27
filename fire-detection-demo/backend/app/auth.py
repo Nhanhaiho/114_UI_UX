@@ -1,5 +1,7 @@
+import hashlib
 import logging
-from typing import Optional
+import time
+from typing import Dict, Optional, Tuple
 from pydantic import BaseModel
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -11,6 +13,12 @@ from app.config import settings, is_placeholder_or_empty
 logger = logging.getLogger("fire_studio_api.auth")
 security = HTTPBearer(auto_error=False)
 
+# Cache ngắn hạn token đã xác thực (key là SHA-256 của token, không lưu raw token)
+# Tránh gọi HTTPS /auth/v1/user lặp lại trên từng frame video/webcam (~1.6s/frame)
+_AUTH_CACHE_TTL_SECONDS = 60.0
+_verified_user_cache: Dict[str, Tuple["AuthenticatedUser", float]] = {}
+_shared_auth_client: Optional[httpx.AsyncClient] = None
+
 
 class AuthenticatedUser(BaseModel):
     id: str
@@ -19,10 +27,39 @@ class AuthenticatedUser(BaseModel):
     is_mock: bool = False
 
 
-async def verify_supabase_token(token: str) -> Optional[AuthenticatedUser]:
+def _get_auth_client() -> httpx.AsyncClient:
+    global _shared_auth_client
+    if _shared_auth_client is None or _shared_auth_client.is_closed:
+        _shared_auth_client = httpx.AsyncClient(timeout=5.0)
+    return _shared_auth_client
+
+
+def _cache_key(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _extract_unverified_exp(token: str) -> Optional[float]:
+    try:
+        claims = jwt.decode(token, options={"verify_signature": False})
+        exp = claims.get("exp")
+        return float(exp) if exp is not None else None
+    except Exception:
+        return None
+
+
+def clear_auth_cache() -> None:
+    """Xóa bộ nhớ đệm xác thực (hữu ích cho unit test)"""
+    _verified_user_cache.clear()
+
+
+async def verify_supabase_token(
+    token: str,
+    use_cache: bool = True,
+) -> Optional[AuthenticatedUser]:
     """
     Xác thực Supabase access token (JWT) và trích xuất email đã xác minh từ tài khoản Supabase.
-    Hỗ trợ xác thực trực tiếp qua Supabase Auth API (/auth/v1/user) và dự phòng cục bộ qua JWT Secret.
+    - Ưu tiên cache ngắn hạn (60s, không vượt quá exp của JWT) cho các frame liên tiếp.
+    - Hỗ trợ giải mã cục bộ qua SUPABASE_JWT_SECRET và xác thực trực tiếp qua /auth/v1/user.
     """
     if not token:
         return None
@@ -44,42 +81,19 @@ async def verify_supabase_token(token: str) -> Optional[AuthenticatedUser]:
             is_mock=True,
         )
 
-    # Cách 1: Xác thực trực tiếp qua Supabase Auth REST endpoint (lấy email & trạng thái xác minh mới nhất)
-    if not is_placeholder_or_empty(settings.SUPABASE_URL):
-        api_key = ""
-        if not is_placeholder_or_empty(settings.SUPABASE_ANON_KEY):
-            api_key = settings.SUPABASE_ANON_KEY.strip()
-        elif not is_placeholder_or_empty(settings.SUPABASE_SERVICE_ROLE_KEY):
-            api_key = settings.SUPABASE_SERVICE_ROLE_KEY.strip()
+    now = time.time()
+    key = _cache_key(token)
+    if use_cache:
+        cached = _verified_user_cache.get(key)
+        if cached is not None:
+            cached_user, expires_at = cached
+            if now < expires_at:
+                return cached_user
+            _verified_user_cache.pop(key, None)
 
-        try:
-            auth_url = f"{settings.SUPABASE_URL.strip().rstrip('/')}/auth/v1/user"
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "apikey": api_key,
-            }
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                res = await client.get(auth_url, headers=headers)
-                if res.status_code == 200:
-                    data = res.json()
-                    user_id = data.get("id")
-                    email = data.get("email")
-                    email_confirmed = bool(
-                        data.get("email_confirmed_at") or data.get("confirmed_at")
-                    )
-                    if user_id and email:
-                        return AuthenticatedUser(
-                            id=user_id,
-                            email=email,
-                            email_confirmed=email_confirmed,
-                            is_mock=False,
-                        )
-                else:
-                    logger.warning(f"Supabase auth check returned status {res.status_code}")
-        except Exception as e:
-            logger.error(f"Lỗi kết nối Supabase Auth: {type(e).__name__}")
+    verified_user: Optional[AuthenticatedUser] = None
 
-    # Cách 2: Giải mã JWT cục bộ bằng SUPABASE_JWT_SECRET nếu đã cấu hình
+    # Cách 1: Giải mã JWT cục bộ bằng SUPABASE_JWT_SECRET nếu đã cấu hình (< 0.1ms, không tốn mạng)
     if not is_placeholder_or_empty(settings.SUPABASE_JWT_SECRET):
         try:
             decoded = jwt.decode(
@@ -97,7 +111,7 @@ async def verify_supabase_token(token: str) -> Optional[AuthenticatedUser]:
                 or user_meta.get("email_verified", False)
             )
             if user_id and email:
-                return AuthenticatedUser(
+                verified_user = AuthenticatedUser(
                     id=user_id,
                     email=email,
                     email_confirmed=email_confirmed,
@@ -106,7 +120,51 @@ async def verify_supabase_token(token: str) -> Optional[AuthenticatedUser]:
         except jwt.PyJWTError as e:
             logger.warning(f"Lỗi giải mã JWT token: {type(e).__name__}")
 
-    return None
+    # Cách 2: Xác thực trực tiếp qua Supabase Auth REST endpoint (/auth/v1/user)
+    if verified_user is None and not is_placeholder_or_empty(settings.SUPABASE_URL):
+        api_key = ""
+        if not is_placeholder_or_empty(settings.SUPABASE_ANON_KEY):
+            api_key = settings.SUPABASE_ANON_KEY.strip()
+        elif not is_placeholder_or_empty(settings.SUPABASE_SERVICE_ROLE_KEY):
+            api_key = settings.SUPABASE_SERVICE_ROLE_KEY.strip()
+
+        try:
+            auth_url = f"{settings.SUPABASE_URL.strip().rstrip('/')}/auth/v1/user"
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "apikey": api_key,
+            }
+            client = _get_auth_client()
+            res = await client.get(auth_url, headers=headers)
+            if res.status_code == 200:
+                data = res.json()
+                user_id = data.get("id")
+                email = data.get("email")
+                email_confirmed = bool(
+                    data.get("email_confirmed_at") or data.get("confirmed_at")
+                )
+                if user_id and email:
+                    verified_user = AuthenticatedUser(
+                        id=user_id,
+                        email=email,
+                        email_confirmed=email_confirmed,
+                        is_mock=False,
+                    )
+            else:
+                logger.warning(f"Supabase auth check returned status {res.status_code}")
+        except Exception as e:
+            logger.error(f"Lỗi kết nối Supabase Auth: {type(e).__name__}")
+
+    if verified_user is not None:
+        exp = _extract_unverified_exp(token)
+        ttl_deadline = now + _AUTH_CACHE_TTL_SECONDS
+        expires_at = min(ttl_deadline, exp) if exp is not None else ttl_deadline
+        if expires_at > now:
+            if len(_verified_user_cache) >= 256:
+                _verified_user_cache.clear()
+            _verified_user_cache[key] = (verified_user, expires_at)
+
+    return verified_user
 
 
 async def get_optional_user(
@@ -115,13 +173,13 @@ async def get_optional_user(
     """Dependency lấy thông tin người dùng nếu có token hợp lệ, không bắt buộc (khách vẫn dùng được)"""
     if not credentials or not credentials.credentials:
         return None
-    return await verify_supabase_token(credentials.credentials)
+    return await verify_supabase_token(credentials.credentials, use_cache=True)
 
 
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> AuthenticatedUser:
-    """Dependency bắt buộc người dùng đã đăng nhập với phiên hợp lệ"""
+    """Dependency bắt buộc người dùng đã đăng nhập với phiên hợp lệ (luôn kiểm tra trực tiếp)"""
     if not credentials or not credentials.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -130,7 +188,7 @@ async def get_current_user(
         )
 
     raw_token = credentials.credentials
-    user = await verify_supabase_token(raw_token)
+    user = await verify_supabase_token(raw_token, use_cache=False)
     if not user:
         if (raw_token.startswith("mock-token-") or raw_token.startswith("test-token-")) and not settings.allow_mock_auth:
             raise HTTPException(

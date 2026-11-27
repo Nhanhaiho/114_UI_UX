@@ -181,4 +181,62 @@ console.log('\n--- TEST 4: Reset các ứng viên dở dang khi tua video / tắ
   console.log('✓ TEST 4 PASS: resetPending xóa sạch trạng thái theo dõi đang dở.');
 }
 
-console.log('\n=== TẤT CẢ 4 BỘ KIỂM THỬ ĐỀU VƯỢT QUA 100% ===');
+// -------------------------------------------------------------
+// Test 5: Khoảng ngắt vượt quá maxGapMs (0ms và 1200ms với maxGapMs=400ms) -> 0 cảnh báo
+// -------------------------------------------------------------
+console.log('\n--- TEST 5: Khoảng ngắt > maxGapMs (0ms -> 1200ms) KHÔNG được cộng dồn/xác nhận ---');
+{
+  const tracker = new FireAlertTracker({
+    triggerConfidence: 0.30,
+    continueConfidence: 0.20,
+    confirmDurationMs: 500,
+    maxGapMs: 400,
+  });
+  const box = [0.25, 0.25, 0.45, 0.45];
+
+  const r1 = tracker.processFrame([makeFireDetection(box, 0.60)], 0, { modelKey: 'model_a.pt' });
+  assert.strictEqual(r1.newAlerts.length, 0);
+
+  // Nhảy cóc tới t=1200ms (> maxGapMs=400ms): ứng viên cũ ở 0ms phải hết hạn, không ghép với 1200ms
+  const r2 = tracker.processFrame([makeFireDetection(box, 0.60)], 1200, { modelKey: 'model_a.pt' });
+  assert.strictEqual(r2.newAlerts.length, 0, 'Khoảng ngắt 1200ms > 400ms không được xác nhận cảnh báo');
+  assert.strictEqual(r2.allAlerts.length, 0, 'Phải bắt đầu ứng viên mới tại 1200ms, tổng cảnh báo = 0');
+
+  // Nếu từ 1200ms tiếp tục duy trì đủ 500ms (tới 1750ms) mới xác nhận đúng 1 cảnh báo
+  const r3 = tracker.processFrame([makeFireDetection(box, 0.60)], 1750, { modelKey: 'model_a.pt' });
+  // 1750 - 1200 = 550ms > 400ms nếu nhảy 1 bước, thử bước 1450ms -> 1750ms để mô phỏng frame liên tục:
+  const trackerCont = new FireAlertTracker({ maxGapMs: 400, confirmDurationMs: 500 });
+  trackerCont.processFrame([makeFireDetection(box, 0.60)], 0);
+  trackerCont.processFrame([makeFireDetection(box, 0.60)], 1200);
+  trackerCont.processFrame([makeFireDetection(box, 0.60)], 1450);
+  const rCont = trackerCont.processFrame([makeFireDetection(box, 0.60)], 1750);
+  assert.strictEqual(rCont.newAlerts.length, 1, 'Duy trì liên tục từ mốc 1200ms tới 1750ms tạo 1 cảnh báo mới');
+  assert.strictEqual(rCont.newAlerts[0].firstSeenMs, 1200, 'firstSeenMs phải bắt đầu lại từ 1200ms');
+  assert.strictEqual(r3.newAlerts.length, 0, 'Nhảy 1750 - 1200 = 550ms > 400ms cũng không cộng dồn');
+  console.log('✓ TEST 5 PASS: Khoảng ngắt > maxGapMs hủy ứng viên cũ trước khi ghép box.');
+}
+
+// -------------------------------------------------------------
+// Test 6: Đổi checkpoint model giữa chừng KHÔNG gộp frame hai model thành cùng cảnh báo
+// -------------------------------------------------------------
+console.log('\n--- TEST 6: Đổi checkpoint KHÔNG gộp sự kiện của hai model ---');
+{
+  const tracker = new FireAlertTracker({
+    triggerConfidence: 0.30,
+    continueConfidence: 0.20,
+    confirmDurationMs: 500,
+    maxGapMs: 400,
+  });
+  const box = [0.2, 0.2, 0.4, 0.4];
+
+  tracker.processFrame([makeFireDetection(box, 0.70)], 0, { modelKey: 'weights/plain_mixedneg_s42_last.pt' });
+  tracker.processFrame([makeFireDetection(box, 0.70)], 300, { modelKey: 'weights/plain_mixedneg_s42_last.pt' });
+
+  // Đổi sang model khác tại t=600ms (kể cả chưa gọi resetPending tường minh, modelKey đổi cũng tự reset)
+  const rSwitch = tracker.processFrame([makeFireDetection(box, 0.70)], 600, { modelKey: 'weights/yolo26n_p2_src.pt' });
+  assert.strictEqual(rSwitch.newAlerts.length, 0, 'Frame từ model mới không được cộng dồn thời gian với model cũ');
+  assert.strictEqual(rSwitch.allAlerts.length, 0);
+  console.log('✓ TEST 6 PASS: Đổi checkpoint không gộp sự kiện của hai model.');
+}
+
+console.log('\n=== TẤT CẢ 6 BỘ KIỂM THỬ ĐỀU VƯỢT QUA 100% ===');
