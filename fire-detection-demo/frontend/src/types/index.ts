@@ -57,6 +57,37 @@ export interface FireAlertEvent {
   isMock: boolean;
   isActive: boolean;
   endedAtMs?: number;
+  emailDispatchStatus?: 'pending' | 'sent' | 'failed';
+  emailDispatchMode?: 'real' | 'mock' | 'error';
+  emailDispatchError?: string | null;
+}
+
+export interface TestEmailFeedback {
+  type: 'pending' | 'accepted' | 'simulated' | 'error';
+  message: string;
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+}
+
+export interface UserEmailPreferences {
+  user_id: string;
+  email: string;
+  email_alerts_enabled: boolean;
+  updated_at?: string;
+}
+
+export interface EmailDispatchItem {
+  event_id: string;
+  session_id: string;
+  recipient_email: string;
+  status: 'pending' | 'sent' | 'failed';
+  mode?: 'real' | 'mock' | 'error';
+  error_message?: string | null;
+  sent_at?: string | null;
+  created_at: string;
 }
 
 export interface RenderViewportRect {

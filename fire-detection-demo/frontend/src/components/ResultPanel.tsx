@@ -11,8 +11,11 @@ import {
   AlertTriangle,
   Play,
   RotateCcw,
+  Check,
+  AlertCircle,
 } from 'lucide-react';
 import type { SourceType, AnalysisState, DetectionItem, ModelStatus, FireAlertEvent } from '../types';
+import { getShortModelName } from '../utils/modelUtils';
 
 interface ResultPanelProps {
   sourceType: SourceType;
@@ -80,17 +83,6 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
 }) => {
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const videoInputRef = useRef<HTMLInputElement | null>(null);
-
-  const getShortModelName = (status: ModelStatus | null) => {
-    if (!status?.is_ready) return 'Chưa nạp';
-    const name = status.model_name || status.model_path || '';
-    if (name.includes('26n') || name.toLowerCase().includes('best')) return 'YOLO26n';
-    if (name.includes('P2+SRC')) return 'YOLO-SRC';
-    if (name.includes('v10') || name.includes('V10')) return 'YOLOv10';
-    if (name.includes('v8') || name.includes('V8')) return 'YOLOv8';
-    if (name.includes('v11') || name.includes('V11')) return 'YOLOv11';
-    return name.split(' ')[0] || 'YOLO';
-  };
 
   const fireDetections = detections.filter(
     (d) => d.class_name.toLowerCase() === 'fire'
@@ -564,16 +556,68 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
 
                     <div className="session-alert-meta-row">
                       <span>Độ tin cậy cao nhất: <strong>{Math.round(alt.maxConfidence * 100)}%</strong></span>
-                      {alt.isMock ? (
-                        <span className="origin-badge badge-mock">
-                          Cảnh báo mô phỏng
-                        </span>
-                      ) : (
-                        <span className="origin-badge badge-real">
-                          Xác nhận AI
-                        </span>
-                      )}
+                      <div className="alert-meta-badges">
+                        {alt.isMock ? (
+                          <span className="origin-badge badge-mock">
+                            Cảnh báo mô phỏng
+                          </span>
+                        ) : (
+                          <span className="origin-badge badge-real">
+                            Xác nhận AI
+                          </span>
+                        )}
+
+                        {alt.emailDispatchStatus && (
+                          <span
+                            className={`dispatch-badge ${
+                              alt.emailDispatchStatus === 'sent' && alt.emailDispatchMode === 'mock'
+                                ? 'badge-mock'
+                                : `badge-${alt.emailDispatchStatus}`
+                            }`}
+                            title={
+                              alt.emailDispatchStatus === 'failed'
+                                ? alt.emailDispatchError || 'Gửi thư thất bại'
+                                : alt.emailDispatchStatus === 'sent' && alt.emailDispatchMode === 'mock'
+                                ? 'Đã mô phỏng gửi email (SMTP Mock)'
+                                : alt.emailDispatchStatus === 'sent'
+                                ? 'Máy chủ email đã chấp nhận thư'
+                                : 'Đang chờ gửi qua máy chủ email...'
+                            }
+                          >
+                            {alt.emailDispatchStatus === 'pending' && (
+                              <>
+                                <Loader2 size={10} className="animate-spin" />
+                                <span>Đang chờ gửi</span>
+                              </>
+                            )}
+                            {alt.emailDispatchStatus === 'sent' && alt.emailDispatchMode === 'mock' && (
+                              <>
+                                <Check size={11} />
+                                <span>Đã mô phỏng gửi email</span>
+                              </>
+                            )}
+                            {alt.emailDispatchStatus === 'sent' && alt.emailDispatchMode !== 'mock' && (
+                              <>
+                                <Check size={11} />
+                                <span>Máy chủ email đã chấp nhận thư</span>
+                              </>
+                            )}
+                            {alt.emailDispatchStatus === 'failed' && (
+                              <>
+                                <AlertCircle size={11} />
+                                <span>Gửi lỗi</span>
+                              </>
+                            )}
+                          </span>
+                        )}
+                      </div>
                     </div>
+
+                    {alt.emailDispatchStatus === 'failed' && alt.emailDispatchError && (
+                      <div className="session-alert-error-note">
+                        {alt.emailDispatchError}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

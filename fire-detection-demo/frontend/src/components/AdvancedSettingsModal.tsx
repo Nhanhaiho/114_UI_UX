@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Cpu, Server, Sliders, CheckCircle, AlertCircle, RefreshCw, Sparkles } from 'lucide-react';
-import type { ModelStatus, BackendHealth } from '../types';
+import { X, Cpu, Server, Sliders, CheckCircle, AlertCircle, RefreshCw, Sparkles, Mail, Send, Check, LogIn, LogOut, Info } from 'lucide-react';
+import type { ModelStatus, BackendHealth, UserProfile, UserEmailPreferences, TestEmailFeedback } from '../types';
 import { getAvailableModels, switchModel, type ModelListItem } from '../services/api';
 
 interface AdvancedSettingsModalProps {
@@ -19,6 +19,15 @@ interface AdvancedSettingsModalProps {
   onRefreshStatus?: () => void;
   isMockMode: boolean;
   onToggleMockMode: (val: boolean) => void;
+  user?: UserProfile | null;
+  userPreferences?: UserEmailPreferences | null;
+  onToggleEmailAlerts?: (enabled: boolean) => void;
+  onSendTestEmail?: () => Promise<void>;
+  onSignOut?: () => void;
+  onOpenAuth?: () => void;
+  testEmailCooldown?: number;
+  isSendingTestEmail?: boolean;
+  testEmailFeedback?: TestEmailFeedback | null;
 }
 
 export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
@@ -37,6 +46,15 @@ export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
   onRefreshStatus,
   isMockMode,
   onToggleMockMode,
+  user,
+  userPreferences,
+  onToggleEmailAlerts,
+  onSendTestEmail,
+  onSignOut,
+  onOpenAuth,
+  testEmailCooldown = 0,
+  isSendingTestEmail = false,
+  testEmailFeedback = null,
 }) => {
   const [modelList, setModelList] = useState<ModelListItem[]>([]);
   const [isSwitching, setIsSwitching] = useState<boolean>(false);
@@ -316,6 +334,133 @@ export const AdvancedSettingsModal: React.FC<AdvancedSettingsModalProps> = ({
                 Chỉ nên bật khi cần kiểm thử luồng giao diện mà không có kết nối đến máy chủ AI backend.
               </p>
             </div>
+          </div>
+
+          {/* Nhóm 4: Cảnh báo qua Email (Supabase Auth & SMTP) */}
+          <div className="settings-section">
+            <h4 className="settings-section-title">
+              <Mail size={16} />
+              <span>Cảnh báo qua Email (Supabase & SMTP)</span>
+            </h4>
+
+            <div className="setting-checkbox-item">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={Boolean(user && userPreferences?.email_alerts_enabled)}
+                  onChange={(e) => {
+                    if (!user) {
+                      if (onOpenAuth) onOpenAuth();
+                    } else {
+                      if (onToggleEmailAlerts) onToggleEmailAlerts(e.target.checked);
+                    }
+                  }}
+                  className="checkbox-input"
+                />
+                <span className="font-medium text-slate-800">
+                  Nhận cảnh báo lửa qua email
+                </span>
+              </label>
+              <p className="setting-hint" style={{ marginTop: '4px', paddingLeft: '24px' }}>
+                Tự động gửi email thông báo khi phát hiện sự kiện lửa kéo dài trên Video tải lên hoặc Webcam.
+              </p>
+            </div>
+
+            {user ? (
+              <div className="email-account-panel">
+                <div className="email-account-info-row">
+                  <div className="email-info-left">
+                    <span className="info-key">Hộp thư nhận cảnh báo:</span>
+                    <span className="email-highlight-chip">{user.email}</span>
+                  </div>
+                  {onSignOut && (
+                    <button
+                      type="button"
+                      className="email-signout-btn"
+                      onClick={onSignOut}
+                      title="Đăng xuất tài khoản hiện tại"
+                    >
+                      <LogOut size={13} />
+                      <span>Đăng xuất</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="test-email-action-row">
+                  <button
+                    type="button"
+                    className="test-email-btn"
+                    disabled={isSendingTestEmail || (testEmailCooldown !== undefined && testEmailCooldown > 0)}
+                    onClick={onSendTestEmail}
+                    title="Gửi thư thử nghiệm kiểm tra kết nối SMTP độc lập với model"
+                  >
+                    {isSendingTestEmail ? (
+                      <>
+                        <RefreshCw size={13} className="animate-spin" />
+                        <span>Đang chờ gửi...</span>
+                      </>
+                    ) : testEmailCooldown && testEmailCooldown > 0 ? (
+                      <>
+                        <Send size={13} />
+                        <span>Gửi lại ({testEmailCooldown}s)</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send size={13} />
+                        <span>Gửi email thử</span>
+                      </>
+                    )}
+                  </button>
+                  <span className="test-email-hint">
+                    Kiểm tra đường gửi thư SMTP độc lập với AI model (cooldown 60s).
+                  </span>
+                </div>
+
+                {testEmailFeedback && (
+                  <div
+                    className={`test-email-feedback ${
+                      testEmailFeedback.type === 'error'
+                        ? 'error'
+                        : testEmailFeedback.type === 'simulated'
+                        ? 'mock'
+                        : testEmailFeedback.type === 'pending'
+                        ? 'pending'
+                        : 'success'
+                    }`}
+                  >
+                    {testEmailFeedback.type === 'error' && (
+                      <AlertCircle size={14} className="shrink-0" />
+                    )}
+                    {testEmailFeedback.type === 'simulated' && (
+                      <Info size={14} className="shrink-0" />
+                    )}
+                    {testEmailFeedback.type === 'pending' && (
+                      <RefreshCw size={14} className="shrink-0 animate-spin" />
+                    )}
+                    {testEmailFeedback.type === 'accepted' && (
+                      <Check size={14} className="shrink-0" />
+                    )}
+                    <span>{testEmailFeedback.message}</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="email-guest-callout">
+                <div className="guest-callout-text">
+                  Bạn đang dùng chế độ Khách. Đăng nhập để bật nhận cảnh báo qua email.
+                </div>
+                {onOpenAuth && (
+                  <button
+                    type="button"
+                    className="guest-login-btn"
+                    onClick={onOpenAuth}
+                  >
+                    <LogIn size={14} />
+                    <span>Đăng nhập</span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

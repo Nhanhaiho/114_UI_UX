@@ -138,6 +138,15 @@ class YoloSRCDetector(DetectorAdapter):
         except Exception as e:
             logger.debug(f"Không thể import src.modules.attention.src tự động: {e}")
 
+        # Tự động nạp và đăng ký NeckSpatialRelationCoAttention (src.modules.co_attention.neck)
+        try:
+            import src.modules.co_attention.neck as neck_src_module
+            if hasattr(neck_src_module, "register_neck_src"):
+                neck_src_module.register_neck_src()
+            logger.info("Đã đăng ký thành công module Neck SRC (src.modules.co_attention.neck) vào Ultralytics.")
+        except Exception as e:
+            logger.debug(f"Không thể import src.modules.co_attention.neck tự động: {e}")
+
     def _load_model(self):
         self._setup_custom_modules()
 
@@ -169,6 +178,10 @@ class YoloSRCDetector(DetectorAdapter):
             name_lower = self._model_path.name.lower()
             if has_src:
                 arch_tag = "YOLO26n-P2+SRC"
+            elif "plain" in name_lower:
+                arch_tag = "YOLO26n-Plain"
+            elif "p2" in name_lower:
+                arch_tag = "YOLO26n-P2"
             elif "v10" in name_lower:
                 arch_tag = "YOLOv10"
             elif "v11" in name_lower:

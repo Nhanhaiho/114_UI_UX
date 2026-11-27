@@ -77,7 +77,7 @@ class SpatialRelationCoAttention(nn.Module):
         fire, smoke = self.fire(x), self.smoke(x)
         lf, ls = self.fire_gate(fire), self.smoke_gate(smoke)
         gf, gs = lf.sigmoid(), ls.sigmoid()
-        if self.collect_aux:
+        if getattr(self, "collect_aux", False):
             self.aux_logits = torch.cat((lf, ls), 1)
         fire, smoke = fire * gf, smoke * gs
         cf = self.fire_from_smoke(fire, smoke, gs)

@@ -1,4 +1,11 @@
-import type { BackendHealth, ModelStatus, InferenceResponse } from '../types';
+import type {
+  BackendHealth,
+  ModelStatus,
+  InferenceResponse,
+  SourceType,
+  UserEmailPreferences,
+  EmailDispatchItem,
+} from '../types';
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -54,7 +61,9 @@ export interface InferImageParams {
   frameId?: number;
   timestampMs?: number;
   confidenceThreshold?: number;
+  sourceType?: SourceType;
   useMock?: boolean;
+  token?: string | null;
   signal?: AbortSignal;
 }
 
@@ -65,7 +74,9 @@ export async function inferImage({
   frameId,
   timestampMs,
   confidenceThreshold,
+  sourceType = 'image',
   useMock = false,
+  token,
   signal,
 }: InferImageParams): Promise<InferenceResponse> {
   const formData = new FormData();
@@ -80,11 +91,18 @@ export async function inferImage({
   if (confidenceThreshold !== undefined) {
     formData.append('confidence_threshold', confidenceThreshold.toString());
   }
+  formData.append('source_type', sourceType);
   formData.append('use_mock', useMock ? 'true' : 'false');
+
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
 
   try {
     const res = await fetch(`${API_BASE_URL}/api/infer/image`, {
       method: 'POST',
+      headers,
       body: formData,
       signal,
     });
@@ -128,4 +146,90 @@ export async function switchModel(modelPath: string): Promise<ModelStatus> {
     throw new ApiError(errorData.detail || 'Không thể chuyển đổi mô hình', res.status);
   }
   return await res.json();
+}
+
+// =============================================================================
+// API QUẢN LÝ TÙY CHỌN EMAIL & GỬI THƯ CẢNH BÁO
+// =============================================================================
+
+export async function getUserPreferences(token: string): Promise<UserEmailPreferences> {
+  const res = await fetch(`${API_BASE_URL}/api/user/preferences`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(data.detail || 'Không thể đọc tùy chọn người dùng', res.status);
+  }
+  return await res.json();
+}
+
+export async function updateUserPreferences(
+  token: string,
+  emailAlertsEnabled: boolean
+): Promise<UserEmailPreferences> {
+  const res = await fetch(`${API_BASE_URL}/api/user/preferences`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ email_alerts_enabled: emailAlertsEnabled }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(data.detail || 'Không thể cập nhật tùy chọn', res.status);
+  }
+  return await res.json();
+}
+
+export async function sendTestEmail(
+  token: string
+): Promise<{
+  success: boolean;
+  mode: 'real' | 'mock';
+  status: 'accepted' | 'simulated';
+  message: string;
+  recipient: string;
+  cooldown_seconds: number;
+}> {
+  const res = await fetch(`${API_BASE_URL}/api/alerts/test-email`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(data.detail || 'Không thể gửi email thử nghiệm', res.status);
+  }
+  return await res.json();
+}
+
+export async function resetAlertSession(sessionId: string): Promise<void> {
+  try {
+    await fetch(`${API_BASE_URL}/api/alerts/reset-session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  } catch (err) {
+    console.warn('Lỗi reset alert session:', err);
+  }
+}
+
+export async function getSessionDispatches(
+  token: string,
+  sessionId: string
+): Promise<EmailDispatchItem[]> {
+  try {
+    const res = await fetch(
+      `${API_BASE_URL}/api/alerts/session-dispatches?session_id=${encodeURIComponent(sessionId)}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.dispatches || [];
+  } catch {
+    return [];
+  }
 }

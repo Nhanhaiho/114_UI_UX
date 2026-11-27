@@ -39,9 +39,11 @@ export const BoundingBoxCanvas: React.FC<BoundingBoxCanvasProps> = ({
       const containerH = canvas.clientHeight;
 
       const dpr = window.devicePixelRatio || 1;
-      if (canvas.width !== containerW * dpr || canvas.height !== containerH * dpr) {
-        canvas.width = containerW * dpr;
-        canvas.height = containerH * dpr;
+      const targetW = Math.round(containerW * dpr);
+      const targetH = Math.round(containerH * dpr);
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
       }
 
       ctx.save();
@@ -59,11 +61,11 @@ export const BoundingBoxCanvas: React.FC<BoundingBoxCanvasProps> = ({
       let mediaH = 0;
 
       if (mediaElement instanceof HTMLVideoElement) {
-        mediaW = mediaElement.videoWidth || 640;
-        mediaH = mediaElement.videoHeight || 360;
+        mediaW = mediaElement.videoWidth;
+        mediaH = mediaElement.videoHeight;
       } else if (mediaElement instanceof HTMLImageElement) {
-        mediaW = mediaElement.naturalWidth || 640;
-        mediaH = mediaElement.naturalHeight || 360;
+        mediaW = mediaElement.naturalWidth;
+        mediaH = mediaElement.naturalHeight;
       }
 
       if (!mediaW || !mediaH) {
@@ -227,9 +229,19 @@ export const BoundingBoxCanvas: React.FC<BoundingBoxCanvasProps> = ({
       ro.observe(targetElement);
     }
 
+    const mediaEl = sourceType === 'image' ? imageRef?.current : videoRef?.current;
+    if (mediaEl) {
+      mediaEl.addEventListener('load', drawCanvas);
+      mediaEl.addEventListener('loadedmetadata', drawCanvas);
+    }
+
     window.addEventListener('resize', drawCanvas);
     return () => {
       if (ro) ro.disconnect();
+      if (mediaEl) {
+        mediaEl.removeEventListener('load', drawCanvas);
+        mediaEl.removeEventListener('loadedmetadata', drawCanvas);
+      }
       window.removeEventListener('resize', drawCanvas);
     };
   }, [

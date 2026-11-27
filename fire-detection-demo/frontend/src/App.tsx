@@ -5,15 +5,28 @@ import { MediaViewer } from './components/MediaViewer';
 import { Toolbar } from './components/Toolbar';
 import { ResultPanel } from './components/ResultPanel';
 import { AdvancedSettingsModal } from './components/AdvancedSettingsModal';
+import { AuthModal } from './components/AuthModal';
 import { useBackendStatus } from './hooks/useBackendStatus';
 import { useWebcam } from './hooks/useWebcam';
-import { inferImage, ApiError } from './services/api';
+import { useAuth } from './hooks/useAuth';
+import {
+  inferImage,
+  getUserPreferences,
+  updateUserPreferences,
+  sendTestEmail,
+  resetAlertSession,
+  getSessionDispatches,
+  ApiError,
+} from './services/api';
 import { FireAlertTracker } from './utils/fireAlertTracker';
+import { getShortModelName } from './utils/modelUtils';
 import type {
   SourceType,
   DetectionItem,
   AnalysisState,
   FireAlertEvent,
+  UserEmailPreferences,
+  TestEmailFeedback,
 } from './types';
 
 export function App() {
@@ -21,6 +34,22 @@ export function App() {
   const { health, modelStatus, isConnected, isChecking, refreshStatus } = useBackendStatus();
   const [isMockMode, setIsMockMode] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+
+  // 1b. Trạng thái Xác thực & Tùy chọn Email
+  const {
+    user,
+    accessToken,
+    signInWithOtp,
+    verifyOtp,
+    signOut,
+    isMockAuth,
+  } = useAuth();
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [userPreferences, setUserPreferences] = useState<UserEmailPreferences | null>(null);
+  const [testEmailCooldown, setTestEmailCooldown] = useState<number>(0);
+  const [isSendingTestEmail, setIsSendingTestEmail] = useState<boolean>(false);
+  const [testEmailFeedback, setTestEmailFeedback] = useState<TestEmailFeedback | null>(null);
+  const testEmailTimerRef = useRef<number | null>(null);
 
   // 2. Trạng thái Nguồn Media
   const [sourceType, setSourceType] = useState<SourceType>('image');
@@ -73,7 +102,7 @@ export function App() {
   const hiddenVideoFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Đồng bộ phiên & thế hệ (để hủy kết quả cũ khi tua/đổi nguồn)
-  const sessionIdRef = useRef<string>('session-demo');
+  const sessionIdRef = useRef<string>(`session_${Date.now()}`);
   const generationIdRef = useRef<number>(1);
   const frameIdCounterRef = useRef<number>(0);
   const isInferringRef = useRef<boolean>(false);
@@ -84,19 +113,125 @@ export function App() {
   const fpsFrameCountRef = useRef<number>(0);
   const fpsWindowStartRef = useRef<number>(0);
 
-  const getShortModelName = useCallback(
-    (status: typeof modelStatus) => {
-      if (!status?.is_ready) return 'Chưa nạp';
-      const name = status.model_name || status.model_path || '';
-      if (name.includes('26n') || name.toLowerCase().includes('best')) return 'YOLO26n';
-      if (name.includes('P2+SRC')) return 'YOLO-SRC';
-      if (name.includes('v10') || name.includes('V10')) return 'YOLOv10';
-      if (name.includes('v8') || name.includes('V8')) return 'YOLOv8';
-      if (name.includes('v11') || name.includes('V11')) return 'YOLOv11';
-      return name.split(' ')[0] || 'YOLO';
+  // Nạp cấu hình nhận email khi đăng nhập
+  useEffect(() => {
+    if (accessToken) {
+      void getUserPreferences(accessToken)
+        .then((prefs) => setUserPreferences(prefs))
+        .catch((err) => console.warn('Lỗi đọc preferences:', err));
+    } else {
+      setUserPreferences(null);
+    }
+  }, [accessToken]);
+
+  // Bộ đếm lùi cooldown cho nút gửi email thử
+  useEffect(() => {
+    let timer: any;
+    if (testEmailCooldown > 0) {
+      timer = setInterval(() => {
+        setTestEmailCooldown((prev) => (prev <= 1 ? 0 : prev - 1));
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [testEmailCooldown]);
+
+  // Đồng bộ trạng thái gửi email từ backend cho các cảnh báo trong phiên
+  useEffect(() => {
+    if (!accessToken || alerts.length === 0 || isMockMode) return;
+
+    let isSubscribed = true;
+    const fetchDispatches = async () => {
+      try {
+        const dispatches = await getSessionDispatches(accessToken, sessionIdRef.current);
+        if (!isSubscribed || dispatches.length === 0) return;
+
+        setAlerts((prevAlerts) =>
+          prevAlerts.map((alt) => {
+            const expectedEventId = `${sessionIdRef.current}_${alt.id}`;
+            const match = dispatches.find(
+              (d) => d.event_id === expectedEventId || d.event_id.endsWith(`_${alt.id}`)
+            );
+            if (match) {
+              return {
+                ...alt,
+                emailDispatchStatus: match.status,
+                emailDispatchMode: match.mode,
+                emailDispatchError: match.error_message,
+              };
+            }
+            return alt;
+          })
+        );
+      } catch {
+        // Silently catch background sync errors
+      }
+    };
+
+    void fetchDispatches();
+    const interval = setInterval(fetchDispatches, 2000);
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+    };
+  }, [accessToken, alerts.length, isMockMode]);
+
+  // Bật/tắt tùy chọn nhận email cảnh báo
+  const handleToggleEmailAlerts = useCallback(
+    async (enabled: boolean) => {
+      if (!accessToken) {
+        setIsAuthModalOpen(true);
+        return;
+      }
+      try {
+        const updated = await updateUserPreferences(accessToken, enabled);
+        setUserPreferences(updated);
+      } catch (err: any) {
+        console.error('Lỗi cập nhật tùy chọn email:', err);
+      }
     },
-    []
+    [accessToken]
   );
+
+  // Gửi email thử nghiệm (phản ánh đúng trạng thái: đang chờ gửi, mô phỏng, SMTP chấp nhận, hoặc lỗi)
+  const handleSendTestEmail = useCallback(async () => {
+    if (!accessToken) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+    if (testEmailTimerRef.current) {
+      window.clearTimeout(testEmailTimerRef.current);
+      testEmailTimerRef.current = null;
+    }
+    setIsSendingTestEmail(true);
+    setTestEmailFeedback({
+      type: 'pending',
+      message: 'Đang chờ gửi...',
+    });
+    try {
+      const res = await sendTestEmail(accessToken);
+      if (res.status === 'simulated' || res.mode === 'mock') {
+        setTestEmailFeedback({
+          type: 'simulated',
+          message: res.message || 'Đã mô phỏng gửi email',
+        });
+      } else {
+        setTestEmailFeedback({
+          type: 'accepted',
+          message: res.message || 'Máy chủ email đã chấp nhận thư',
+        });
+      }
+      setTestEmailCooldown(res.cooldown_seconds || 60);
+      testEmailTimerRef.current = window.setTimeout(() => setTestEmailFeedback(null), 10000);
+    } catch (err: any) {
+      setTestEmailFeedback({
+        type: 'error',
+        message: `Lỗi: ${err.message || 'Không thể gửi email thử'}`,
+      });
+      testEmailTimerRef.current = window.setTimeout(() => setTestEmailFeedback(null), 12000);
+    } finally {
+      setIsSendingTestEmail(false);
+    }
+  }, [accessToken]);
 
   // Tăng generation_id và xóa sạch box cũ
   const resetSessionGeneration = useCallback(() => {
@@ -111,6 +246,7 @@ export function App() {
     setDetections([]);
     setAnalysisState('idle');
     setErrorMessage(null);
+    void resetAlertSession(sessionIdRef.current);
   }, []);
 
   // Helper fetch blob từ URL nội bộ
@@ -167,7 +303,9 @@ export function App() {
           sessionId: sessionIdRef.current,
           generationId: currentGen,
           confidenceThreshold,
+          sourceType: 'image',
           useMock: isMockMode,
+          token: accessToken,
           signal: controller.signal,
         });
 
@@ -201,7 +339,7 @@ export function App() {
         abortControllerRef.current = null;
       }
     },
-    [confidenceThreshold, isMockMode, modelStatus, getShortModelName, resetSessionGeneration]
+    [confidenceThreshold, isMockMode, modelStatus, resetSessionGeneration, accessToken]
   );
 
   // Phân tích ảnh mẫu mặc định đang xem sẵn lúc vừa mở trang
@@ -337,6 +475,7 @@ export function App() {
       trackerRef.current.resetPending();
       setActiveAlert(null);
       setDetections([]);
+      void resetAlertSession(sessionIdRef.current);
     }
   }, []);
 
@@ -372,6 +511,7 @@ export function App() {
       trackerRef.current.resetPending();
       setActiveAlert(null);
       setDetections([]);
+      void resetAlertSession(sessionIdRef.current);
 
       if (videoRef.current && videoRef.current.paused && isDetectionActive) {
         captureAndInferFrame(newTime * 1000);
@@ -429,7 +569,9 @@ export function App() {
               frameId: currentFrameId,
               timestampMs: targetTimeMs,
               confidenceThreshold: apiThreshold,
+              sourceType: sourceType,
               useMock: isMockMode,
+              token: accessToken,
               signal: controller.signal,
             });
 
@@ -448,7 +590,23 @@ export function App() {
               { isMock: isMockMode, isVideo: sourceType === 'video' }
             );
 
-            setAlerts(trackerRes.allAlerts);
+            // Đánh dấu pending cho cảnh báo mới nếu người dùng bật nhận email
+            const updatedAlerts = trackerRes.allAlerts.map((alt) => {
+              if (
+                trackerRes.newAlerts.some((na) => na.id === alt.id) &&
+                accessToken &&
+                userPreferences?.email_alerts_enabled &&
+                !isMockMode
+              ) {
+                return {
+                  ...alt,
+                  emailDispatchStatus: alt.emailDispatchStatus || 'pending',
+                };
+              }
+              return alt;
+            });
+
+            setAlerts(updatedAlerts);
             setActiveAlert(
               trackerRes.activeAlerts.length > 0 ? trackerRes.activeAlerts[0] : null
             );
@@ -497,7 +655,7 @@ export function App() {
         0.85
       );
     },
-    [confidenceThreshold, isMockMode, sourceType, timestampToleranceMs]
+    [confidenceThreshold, isMockMode, sourceType, timestampToleranceMs, accessToken, userPreferences]
   );
 
   // Vòng lặp lấy mẫu frame Video hoặc Webcam
@@ -609,6 +767,9 @@ export function App() {
           resetSessionGeneration();
         }}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        user={user}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+        onSignOut={signOut}
       />
 
       {/* 2. Workspace Container */}
@@ -748,6 +909,28 @@ export function App() {
         onRefreshStatus={refreshStatus}
         isMockMode={isMockMode}
         onToggleMockMode={setIsMockMode}
+        user={user}
+        userPreferences={userPreferences}
+        onToggleEmailAlerts={handleToggleEmailAlerts}
+        onSendTestEmail={handleSendTestEmail}
+        onSignOut={signOut}
+        onOpenAuth={() => {
+          setIsSettingsOpen(false);
+          setIsAuthModalOpen(true);
+        }}
+        testEmailCooldown={testEmailCooldown}
+        isSendingTestEmail={isSendingTestEmail}
+        testEmailFeedback={testEmailFeedback}
+      />
+
+      {/* 5. Modal Đăng nhập Supabase OTP */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onSignInSuccess={() => setIsAuthModalOpen(false)}
+        signInWithOtp={signInWithOtp}
+        verifyOtp={verifyOtp}
+        isMockAuth={isMockAuth}
       />
     </div>
   );
