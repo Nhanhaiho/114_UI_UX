@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BoundingBoxCanvas } from './BoundingBoxCanvas';
 import type { SourceType, DetectionItem, FireAlertEvent } from '../types';
-import { Loader2, Camera, UploadCloud, Flame } from 'lucide-react';
+import { Loader2, Camera, UploadCloud, Flame, FolderOpen } from 'lucide-react';
 
 interface MediaViewerProps {
   sourceType: SourceType;
@@ -11,6 +11,8 @@ interface MediaViewerProps {
   isCameraActive: boolean;
   caption: string;
   onDropFile: (file: File) => void;
+  onRequestUploadImage?: () => void;
+  onRequestUploadVideo?: () => void;
 
   videoRef: React.RefObject<HTMLVideoElement | null>;
   imageRef: React.RefObject<HTMLImageElement | null>;
@@ -41,6 +43,8 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
   isCameraActive,
   caption,
   onDropFile,
+  onRequestUploadImage,
+  onRequestUploadVideo,
   videoRef,
   imageRef,
   containerRef,
@@ -155,7 +159,21 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
             </div>
           ) : (
             <div className="media-placeholder-box">
-              <p>Chưa có ảnh hiển thị. Kéo thả hoặc chọn ảnh từ máy tính.</p>
+              <UploadCloud size={34} className="text-stone-400 mb-1" />
+              <p className="font-medium text-stone-700">Chưa có ảnh hiển thị</p>
+              <p className="text-xs text-stone-500">
+                Kéo thả ảnh (JPG, PNG, WebP) vào đây hoặc bấm nút để chọn từ máy tính.
+              </p>
+              {onRequestUploadImage && (
+                <button
+                  type="button"
+                  className="media-placeholder-upload-btn"
+                  onClick={onRequestUploadImage}
+                >
+                  <FolderOpen size={16} />
+                  <span>Tải ảnh lên</span>
+                </button>
+              )}
             </div>
           )
         )}
@@ -190,7 +208,21 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
             </div>
           ) : (
             <div className="media-placeholder-box">
-              <p>Chưa có video. Kéo thả tệp video MP4/WebM hoặc chọn video từ máy tính.</p>
+              <UploadCloud size={34} className="text-stone-400 mb-1" />
+              <p className="font-medium text-stone-700">Chưa có video hiển thị</p>
+              <p className="text-xs text-stone-500">
+                Kéo thả tệp video MP4/WebM vào đây hoặc bấm nút để chọn từ máy tính.
+              </p>
+              {onRequestUploadVideo && (
+                <button
+                  type="button"
+                  className="media-placeholder-upload-btn"
+                  onClick={onRequestUploadVideo}
+                >
+                  <FolderOpen size={16} />
+                  <span>Tải video lên</span>
+                </button>
+              )}
             </div>
           )
         )}

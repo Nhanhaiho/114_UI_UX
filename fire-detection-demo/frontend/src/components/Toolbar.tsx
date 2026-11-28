@@ -25,6 +25,7 @@ interface ToolbarProps {
 
   // Image actions
   onReinferImage?: () => void;
+  hasImage?: boolean;
   isAnalyzing?: boolean;
   onChangeImageFile?: () => void;
 
@@ -56,6 +57,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   confidenceThreshold,
   onChangeConfidence,
   onReinferImage,
+  hasImage = true,
   isAnalyzing,
   onChangeImageFile,
   playbackRate = 1.0,
@@ -82,7 +84,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               type="button"
               className="toolbar-btn primary-action"
               onClick={onReinferImage}
-              disabled={isAnalyzing}
+              disabled={isAnalyzing || !hasImage}
               title="Phân tích lại ảnh hiện tại với mô hình hoặc ngưỡng đã chọn"
             >
               <RotateCcw size={14} className={isAnalyzing ? 'animate-spin' : ''} />

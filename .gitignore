@@ -91,3 +91,16 @@ ehthumbs.db
 Thumbs.db
 *.log
 
+# ==========================================
+# Thư mục cấu hình công cụ AI & Test caches
+# ==========================================
+.agent/
+.agents/
+.claude/
+.codex/
+.cursor/
+.gemini/
+.impeccable/
+.pytest_cache/
+**/.pytest_cache/
+

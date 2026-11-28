@@ -53,13 +53,11 @@ export function App() {
 
   // 2. Trạng thái Nguồn Media
   const [sourceType, setSourceType] = useState<SourceType>('image');
-  const [imageSrc, setImageSrc] = useState<string>('/samples/sample_fire_smoke.jpg');
-  const [caption, setCaption] = useState<string>('Ảnh mẫu · Chưa phân tích');
-  const [activeSample, setActiveSample] = useState<'fire_smoke' | 'neutral' | 'custom'>('fire_smoke');
-  const [isSampleAnalyzed, setIsSampleAnalyzed] = useState<boolean>(false);
+  const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const [caption, setCaption] = useState<string>('Ảnh · Chưa chọn tệp');
   const currentBlobRef = useRef<Blob | File | null>(null);
 
-  const [videoSrc, setVideoSrc] = useState<string | null>('/samples/sample_fire.mp4');
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
 
   // Webcam Hook
   const webcam = useWebcam();
@@ -266,13 +264,6 @@ export function App() {
     setErrorMessage(null);
   }, [abortAndResetPendingTracking]);
 
-  // Helper fetch blob từ URL nội bộ
-  const fetchSampleBlob = useCallback(async (url: string): Promise<Blob> => {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Không thể nạp tệp mẫu từ ${url}`);
-    return await res.blob();
-  }, []);
-
   // Chuyển đổi nguồn (Ảnh, Video, Camera)
   const handleChangeSource = useCallback(
     (newSource: SourceType) => {
@@ -293,14 +284,14 @@ export function App() {
       setSourceType(newSource);
 
       if (newSource === 'image') {
-        setCaption(isSampleAnalyzed ? 'Ảnh mẫu · Đã phân tích' : 'Ảnh mẫu · Chưa phân tích');
+        setCaption(imageSrc ? 'Ảnh · Đã tải lên' : 'Ảnh · Chưa chọn tệp');
       } else if (newSource === 'video') {
-        setCaption('Video mẫu · Sẵn sàng phát hiện');
+        setCaption(videoSrc ? 'Video · Sẵn sàng phát hiện' : 'Video · Chưa chọn tệp');
       } else if (newSource === 'camera') {
         setCaption('Webcam · Chưa bật camera');
       }
     },
-    [sourceType, webcam, resetSessionGeneration, isSampleAnalyzed]
+    [sourceType, webcam, resetSessionGeneration, imageSrc, videoSrc]
   );
 
   // Suy luận cho ảnh tĩnh
@@ -359,72 +350,21 @@ export function App() {
     [confidenceThreshold, isMockMode, modelStatus, resetSessionGeneration, accessToken]
   );
 
-  // Phân tích ảnh mẫu mặc định đang xem sẵn lúc vừa mở trang
-  const handleAnalyzeCurrentSample = useCallback(async () => {
-    try {
-      const samplePath =
-        activeSample === 'neutral'
-          ? '/samples/sample_neutral.jpg'
-          : '/samples/sample_fire_smoke.jpg';
-      const blob = await fetchSampleBlob(samplePath);
-      currentBlobRef.current = blob;
-      setIsSampleAnalyzed(true);
-      await handleInferImage(blob, 'Ảnh mẫu · Đã phân tích');
-    } catch (err: any) {
-      setAnalysisState('error');
-      setErrorMessage(err.message || 'Không thể đọc tệp mẫu');
-    }
-  }, [activeSample, fetchSampleBlob, handleInferImage]);
-
   // Phân tích lại bức ảnh hiện tại (với model mới hoặc ngưỡng mới)
   const handleReinferCurrentImage = useCallback(async () => {
+    const fileToSend = currentBlobRef.current;
+    if (!fileToSend) return;
     try {
-      let fileToSend: Blob | File | null = currentBlobRef.current;
-      if (!fileToSend) {
-        const samplePath =
-          activeSample === 'neutral'
-            ? '/samples/sample_neutral.jpg'
-            : '/samples/sample_fire_smoke.jpg';
-        fileToSend = await fetchSampleBlob(samplePath);
-        currentBlobRef.current = fileToSend;
-      }
-      setIsSampleAnalyzed(true);
       await handleInferImage(fileToSend, 'Ảnh đã phân tích lại');
     } catch (err: any) {
       setAnalysisState('error');
       setErrorMessage(err.message || 'Lỗi phân tích lại ảnh');
     }
-  }, [activeSample, fetchSampleBlob, handleInferImage]);
-
-  // Bấm chọn 1 trong 2 thumbnail mẫu -> đổi ảnh & chạy auto-infer
-  const handleSelectSample = useCallback(
-    async (type: 'fire_smoke' | 'neutral') => {
-      setActiveSample(type);
-      const samplePath =
-        type === 'neutral' ? '/samples/sample_neutral.jpg' : '/samples/sample_fire_smoke.jpg';
-      setImageSrc(samplePath);
-
-      try {
-        const blob = await fetchSampleBlob(samplePath);
-        currentBlobRef.current = blob;
-        setIsSampleAnalyzed(true);
-        const title =
-          type === 'fire_smoke'
-            ? 'Ảnh mẫu: Có lửa hoặc khói · Đã phân tích'
-            : 'Ảnh mẫu: Cảnh bình thường · Đã phân tích';
-        await handleInferImage(blob, title);
-      } catch (err: any) {
-        setAnalysisState('error');
-        setErrorMessage(err.message || 'Lỗi nạp ảnh mẫu');
-      }
-    },
-    [fetchSampleBlob, handleInferImage]
-  );
+  }, [handleInferImage]);
 
   // Xử lý nạp ảnh tĩnh từ file máy tính (Tự động nhận diện ngay)
   const handleSelectImageFile = useCallback(
     (file: File) => {
-      setActiveSample('custom');
       resetSessionGeneration();
       if (imageSrc && imageSrc.startsWith('blob:')) {
         URL.revokeObjectURL(imageSrc);
@@ -454,14 +394,6 @@ export function App() {
     },
     [videoSrc, resetSessionGeneration]
   );
-
-  // Nạp video mẫu
-  const handleLoadSampleVideo = useCallback(async () => {
-    resetSessionGeneration();
-    setVideoSrc('/samples/sample_fire.mp4');
-    setCaption('Video mẫu khói cháy rừng');
-    setIsPlaying(false);
-  }, [resetSessionGeneration]);
 
   // Xử lý kéo thả tệp vào bất kỳ đâu trên vùng xem lớn
   const handleDropFile = useCallback(
@@ -740,14 +672,13 @@ export function App() {
     }
   }, [sourceType, webcam.isStreaming]);
 
-  // Tự động nạp demo qua URL (?demo=fire)
+  // Tự động bật chế độ mô phỏng qua URL (?demo=fire)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('demo') === 'fire') {
       setIsMockMode(true);
-      void handleSelectSample('fire_smoke');
     }
-  }, [handleSelectSample]);
+  }, []);
 
   return (
     <div className="editorial-app-layout">
@@ -816,6 +747,8 @@ export function App() {
               isCameraActive={webcam.isStreaming}
               caption={caption}
               onDropFile={handleDropFile}
+              onRequestUploadImage={() => hiddenImageFileInputRef.current?.click()}
+              onRequestUploadVideo={() => hiddenVideoFileInputRef.current?.click()}
               videoRef={videoRef}
               imageRef={imageRef}
               containerRef={containerRef}
@@ -845,6 +778,7 @@ export function App() {
               confidenceThreshold={confidenceThreshold}
               onChangeConfidence={setConfidenceThreshold}
               onReinferImage={handleReinferCurrentImage}
+              hasImage={Boolean(imageSrc)}
               isAnalyzing={analysisState === 'analyzing'}
               onChangeImageFile={() => hiddenImageFileInputRef.current?.click()}
               playbackRate={playbackRate}
@@ -868,7 +802,7 @@ export function App() {
             />
           </section>
 
-          {/* Cột phải: Nguồn -> Mẫu thử -> Kết quả */}
+          {/* Cột phải: Nguồn -> Kết quả */}
           <ResultPanel
             sourceType={sourceType}
             analysisState={analysisState}
@@ -887,11 +821,6 @@ export function App() {
             alerts={alerts}
             onSelectImageFile={handleSelectImageFile}
             onSelectVideoFile={handleSelectVideoFile}
-            onSelectSample={handleSelectSample}
-            onAnalyzeCurrentSample={handleAnalyzeCurrentSample}
-            activeSample={activeSample}
-            isSampleAnalyzed={isSampleAnalyzed}
-            onLoadSampleVideo={handleLoadSampleVideo}
             onStartCamera={() => webcam.startCamera()}
             onStopCamera={() => {
               webcam.stopCamera();

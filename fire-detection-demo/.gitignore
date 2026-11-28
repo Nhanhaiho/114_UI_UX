@@ -26,10 +26,12 @@ __pycache__/
 backend/__pycache__/
 backend/app/__pycache__/
 
-# Môi trường ảo (Virtual Environments)
+# Môi trường ảo (Virtual Environments) & Test Caches
 .venv/
 venv/
 env/
+.pytest_cache/
+**/.pytest_cache/
 
 # ==========================================
 # Cấu hình Môi trường Cục bộ & Bảo mật
