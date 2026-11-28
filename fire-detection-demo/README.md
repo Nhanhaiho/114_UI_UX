@@ -10,10 +10,10 @@ Dành cho bạn/thành viên mới khi clone hoặc copy dự án về máy: hã
 
 | Thành phần | Phiên bản yêu cầu | Phiên bản khuyến nghị | Lệnh kiểm tra trên máy |
 |---|---|---|---|
-| **Node.js** | `>= 18.18.0` hoặc `>= 20.0.0` | **Node.js 20 LTS** (hoặc v22 / v24) | `node -v` |
-| **npm** | `>= 9.0.0` | **npm 10.x** hoặc **npm 11.x** | `npm -v` |
-| **Vite** | **`^8.3.6` (Vite 8)** | Tự động cài qua `npm install` | `npx vite --version` |
-| **React** | **`^19.3.1` (React 19)** | Tự động cài qua `npm install` | Xem trong `package.json` |
+| **Node.js** | `>= 22.12.0` | **Node.js 22 LTS** | `node -v` |
+| **npm** | `>= 10.0.0` | **npm 10.x** hoặc **npm 11.x** | `npm -v` |
+| **Vite** | **`^8.3.6` (Vite 8)** | Tự động cài qua `npm ci` | `npx vite --version` |
+| **React** | **`^19.3.1` (React 19)** | Tự động cài qua `npm ci` | Xem trong `package.json` |
 | **Python** | `>= 3.10` (64-bit) | **Python 3.11**, **3.12** hoặc **3.13** | `python --version` |
 | **PyTorch** | `>= 2.0.0` (CUDA hoặc CPU) | **`torch >= 2.3` kèm CUDA 12.x** | `python -c "import torch; print(torch.__version__, torch.cuda.is_available())"` |
 | **Ultralytics** | `>= 8.0.0` | **Ultralytics 8.4.x** | `python -c "import ultralytics; print(ultralytics.__version__)"` |
@@ -33,11 +33,10 @@ Dự án gồm 2 phần độc lập:
 
 Mở cửa sổ **Terminal 1** (PowerShell hoặc CMD) và thực hiện tuần tự:
 
-#### Bước 1.1: Chuyển vào thư mục backend
-```powershell
-cd C:\fire_smoke_web\fire-detection-demo\backend
+#### Bước 1.1: Chuyển vào thư mục backend (từ thư mục gốc repo)
+```bash
+cd fire-detection-demo/backend
 ```
-*(Nếu bạn để project ở ổ đĩa khác, thay bằng đường dẫn thư mục `fire-detection-demo\backend` trên máy bạn).*
 
 #### Bước 1.2: (Khuyến nghị) Tạo và kích hoạt môi trường ảo Python venv
 ```powershell
@@ -72,21 +71,24 @@ python -m pip install -r requirements.txt
 > - **Nếu máy không có GPU rời (chạy bằng CPU bình thường):**
 >   Lệnh `pip install -r requirements.txt` đã tự động cài đặt PyTorch bản CPU, không cần cài gì thêm.
 
-#### Bước 1.4: Cấu hình Model trong file `.env`
-Trong thư mục `backend/`, mở tệp `.env` để chọn model muốn chạy:
+#### Bước 1.4: Tạo `.env` từ mẫu và cấu hình Model
+```bash
+# Windows PowerShell:
+Copy-Item .env.example .env
+
+# macOS / Linux:
+# cp .env.example .env
+```
+Mở tệp `backend/.env` và trỏ `MODEL_PATH` đến file checkpoint `.pt` đặt trong `backend/weights/` (ví dụ `weights/best.pt`):
 ```env
-# Lựa chọn 1: Model YOLO26n cơ bản (yolo26ncombineddataset.pt)
-MODEL_PATH=weights/yolo26ncombineddataset.pt
-
-# Lựa chọn 2: Model YOLO26n-P2 kèm module SRC (src_ratio8.pt)
-# MODEL_PATH=weights/src_ratio8.pt
-
+MODEL_PATH=weights/best.pt
 MODEL_CODE_DIR=model_code
 DEVICE=  # để trống sẽ tự động nhận diện CUDA nếu có, hoặc điền 'cpu', 'cuda:0'
 IMGSZ=640
 CONF_THRESHOLD=0.25
 MAX_IMAGE_SIZE_MB=20
 ```
+*(Các biến `SUPABASE_*` và `SMTP_*` trong `.env` là tùy chọn nếu bạn muốn bật đăng nhập OTP và cảnh báo email — xem chi tiết ở `README.md` gốc).*
 
 #### Bước 1.5: Khởi chạy Backend Server
 ```powershell
@@ -110,22 +112,25 @@ python run.py
 Mở cửa sổ **Terminal 2** riêng biệt:
 
 #### Bước 2.1: Kiểm tra phiên bản Node.js và npm
-```powershell
+```bash
 node -v
 npm -v
 ```
-- Đảm bảo `node -v` ra kết quả từ **`v18.18.0`** hoặc **`v20.0.0`** trở lên (tốt nhất là Node 20 LTS, 22 hoặc 24).
-- Đảm bảo `npm -v` ra kết quả từ **`9.0.0`** trở lên.
+- Đảm bảo `node -v` từ **`v22.12.0`** trở lên (Node.js 22 LTS) để tương thích cả Vite 8 và `@supabase/supabase-js`.
+- Đảm bảo `npm -v` từ **`10.0.0`** trở lên.
 *(Nếu chưa cài Node.js, tải bản mới nhất tại: https://nodejs.org)*
 
-#### Bước 2.2: Chuyển vào thư mục frontend
-```powershell
-cd C:\fire_smoke_web\fire-detection-demo\frontend
+#### Bước 2.2: Chuyển vào thư mục frontend (từ thư mục gốc repo)
+```bash
+cd fire-detection-demo/frontend
 ```
 
-#### Bước 2.3: Cài đặt dependencies (NPM Install)
-```powershell
-npm install
+#### Bước 2.3: Tạo `.env` (tùy chọn) và cài đặt dependencies
+```bash
+# Windows PowerShell:
+Copy-Item .env.example .env
+
+npm ci
 ```
 Lệnh này sẽ tự động tải và cài đặt toàn bộ gói theo `package.json` vào thư mục `node_modules`, bao gồm:
 - **`vite`**: Phiên bản **`^8.3.6`**
@@ -200,21 +205,18 @@ fire-detection-demo/
     ├── package.json                    # Khai báo dependency: React 19, Vite 8, Lucide icon
     ├── vite.config.ts                  # File cấu hình Vite
     ├── index.html                      # HTML root template
-    ├── public/
-    │   └── samples/                    # Ảnh mẫu tĩnh nạp trực tiếp vào giao diện
     └── src/
         ├── App.tsx                     # Component gốc điều phối trạng thái (Orchestrator)
-        ├── index.css                   # Dark theme studio, màu sắc WCAG AA, responsive
+        ├── index.css                   # Giao diện studio, màu sắc WCAG AA, responsive
         ├── components/
         │   ├── Header.tsx              # Thanh tiêu đề, trạng thái kết nối Backend & Model
         │   ├── SourceTabs.tsx          # 3 Tab chọn nguồn: Ảnh, Video, Camera
-        │   ├── MediaViewer.tsx         # Khung hiển thị media letterbox contain
+        │   ├── MediaViewer.tsx         # Khung hiển thị media letterbox contain & nút tải tệp
         │   ├── BoundingBoxCanvas.tsx   # Canvas vẽ box Lửa (Đỏ) và Khói (Cyan)
-        │   ├── Toolbar.tsx             # Nút điều khiển: Phát hiện, Ngưỡng tin cậy, Tua, Fullscreen
+        │   ├── Toolbar.tsx             # Nút điều khiển: Phân tích lại, Ngưỡng tin cậy, Tua, Fullscreen
         │   ├── ResultPanel.tsx         # Bảng kết quả đo lường: Latency ms, FPS, danh sách box
-        │   ├── EmptyUploadArea.tsx     # Khung kéo thả tệp và 2 nút thử nhanh ảnh mẫu
-        │   └── AdvancedSettingsModal.tsx # Xem chi tiết thông số model
-        ├── hooks/                      # useBackendStatus, useWebcam (quản lý camera an toàn)
+        │   └── AdvancedSettingsModal.tsx # Xem chi tiết thông số model & email
+        ├── hooks/                      # useBackendStatus, useWebcam, useAuth
         ├── services/api.ts             # Gọi API HTTP Multipart sang backend
         ├── types/index.ts              # Interface TypeScript
         └── utils/coordinateUtils.ts    # Thuật toán tính bù trừ viền đen contain
@@ -225,13 +227,12 @@ fire-detection-demo/
 ## 🎯 CÁC CHỨC NĂNG CHÍNH CỦA HỆ THỐNG
 
 1. **Tab Ảnh tĩnh**:
-   - Kéo thả hoặc tải ảnh JPG/PNG/WebP.
-   - Bấm nút **`Ảnh mẫu có lửa`** hoặc **`Ảnh không có lửa`** để xem ngay kết quả mà không cần tải ảnh ngoài.
-   - Bấm **`Phát hiện lửa`** $\rightarrow$ xem Bounding Box phân biệt rõ **Lửa (viền đỏ)** và **Khói (viền cyan)**.
+   - Mở ở trạng thái chưa chọn ảnh; kéo thả hoặc bấm nút tải ảnh JPG/PNG/WebP từ máy tính.
+   - Tự động phân tích ngay khi chọn ảnh và cho phép bấm **`Phân tích lại`** sau khi đổi ngưỡng hoặc model $\rightarrow$ xem Bounding Box phân biệt rõ **Lửa (viền đỏ)** và **Khói (viền cyan)**.
 2. **Tab Video tệp tin**:
-   - Tải tệp MP4 hoặc WebM (hỗ trợ tới 300 MB).
-   - Play, Pause, tua thanh trượt mượt mà, đổi tốc độ xem (0.5x, 1x, 1.5x, 2x).
-   - Công tắc **`Bật nhận diện AI`**: tự động lấy mẫu frame thời gian thực (3–5 FPS).
+   - Mở ở trạng thái chưa chọn tệp; kéo thả hoặc chọn tệp MP4 hoặc WebM từ máy tính (hỗ trợ tới 300 MB).
+   - Play, Pause, tua thanh trượt mượt mà, đổi tốc độ xem (0.5x, 1x, 1.25x, 1.5x, 2x).
+   - Công tắc **`Nhận diện: BẬT/TẮT`**: tự động lấy mẫu frame thời gian thực.
    - Tự động ngắt request cũ khi tua video (`generation_id`) để box không bao giờ bị trễ frame.
 3. **Tab Camera (Webcam)**:
    - Cấp quyền mở webcam máy tính, có hỗ trợ chọn camera nếu máy có nhiều thiết bị.
@@ -248,29 +249,19 @@ fire-detection-demo/
 
 ## 🔄 CÁCH CHUYỂN ĐỔI NHANH GIỮA CÁC MODEL CHECKPOINT
 
-Hệ thống đã tích hợp sẵn 2 model huấn luyện thực tế trong thư mục `backend/weights/`:
-1. **`src_ratio8.pt`**: Model **YOLO26n-P2 + SRC** (31 layers, có module Spatial-Relational Co-Attention).
-2. **`yolo26ncombineddataset.pt`**: Model **YOLO26n Combined** (24 layers cơ bản).
+Đặt các tệp trọng số `.pt` của bạn vào thư mục `backend/weights/`, sau đó chọn model:
 
-Để đổi model:
-1. Mở file [`backend/.env`](file:///c:/fire_smoke_web/fire-detection-demo/backend/.env).
-2. Đổi dòng `MODEL_PATH`:
-   ```env
-   # Muốn dùng model YOLO26n Combined:
-   MODEL_PATH=weights/yolo26ncombineddataset.pt
-
-   # Hoặc muốn đổi sang model YOLO26n-P2 + SRC:
-   # MODEL_PATH=weights/src_ratio8.pt
-   ```
-3. Khởi động lại Backend (`Ctrl + C` tại Terminal 1 rồi gõ `python run.py`). Giao diện web sẽ tự động cập nhật tên model tương ứng.
+1. Mở file `backend/.env` (sao chép từ `backend/.env.example`).
+2. Đổi dòng `MODEL_PATH` trỏ đến tệp trong `weights/` (ví dụ `MODEL_PATH=weights/best.pt`), hoặc đổi trực tiếp checkpoint ngay trên giao diện Cài đặt qua API `/api/model/switch`.
+3. Kiểm tra model đang nạp tại `http://localhost:8000/api/model/status`.
 
 ---
 
 ## 🛠️ XỬ LÝ SỰ CỐ THƯỜNG GẶP (TROUBLESHOOTING)
 
-### 1. Lỗi `npm install` hoặc lỗi phiên bản Node.js
-- **Nguyên nhân**: Node.js trên máy bạn quá cũ (dưới v18).
-- **Khắc phục**: Truy cập https://nodejs.org và tải bản **Node.js 20 LTS** hoặc mới hơn, sau đó cài đặt và mở lại Terminal.
+### 1. Lỗi `npm ci` / `npm install` hoặc lỗi phiên bản Node.js
+- **Nguyên nhân**: Node.js trên máy bạn thấp hơn yêu cầu của `package-lock.json` (`>= 22.12.0`).
+- **Khắc phục**: Truy cập https://nodejs.org và tải bản **Node.js 22 LTS** trở lên, sau đó mở lại Terminal.
 
 ### 2. Lỗi cổng 8000 hoặc 5173 bị chiếm (Port already in use)
 - **Khắc phục**: Mở PowerShell gõ lệnh giải phóng cổng:
@@ -298,6 +289,6 @@ Hệ thống đã tích hợp sẵn 2 model huấn luyện thực tế trong th�
 
 ## 📚 TÀI LIỆU BỔ TRỢ
 
-- 📄 [Tóm tắt cấu trúc phục vụ báo cáo Đồ án Cuối kỳ (PROJECT_STRUCTURE.md)](file:///c:/fire_smoke_web/fire-detection-demo/PROJECT_STRUCTURE.md)
-- 📄 [Tài liệu hướng dẫn nạp checkpoint & module SRC (MODEL_INTEGRATION.md)](file:///c:/fire_smoke_web/fire-detection-demo/docs/MODEL_INTEGRATION.md)
-- 📄 [Đặc tả hợp đồng API Contract (API_CONTRACT.md)](file:///c:/fire_smoke_web/fire-detection-demo/docs/API_CONTRACT.md)
+- 📄 [Tóm tắt cấu trúc phục vụ báo cáo Đồ án Cuối kỳ (`PROJECT_STRUCTURE.md`)](./PROJECT_STRUCTURE.md)
+- 📄 [Tài liệu hướng dẫn nạp checkpoint & module SRC (`MODEL_INTEGRATION.md`)](./docs/MODEL_INTEGRATION.md)
+- 📄 [Đặc tả hợp đồng API Contract (`API_CONTRACT.md`)](./docs/API_CONTRACT.md)

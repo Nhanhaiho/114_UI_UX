@@ -9,8 +9,6 @@ import {
   Loader2,
   CheckCircle2,
   AlertTriangle,
-  Play,
-  RotateCcw,
   Check,
   AlertCircle,
 } from 'lucide-react';
@@ -38,14 +36,7 @@ interface ResultPanelProps {
   onSelectImageFile: (file: File) => void;
   onSelectVideoFile: (file: File) => void;
 
-  // Sample actions
-  onSelectSample: (type: 'fire_smoke' | 'neutral') => void;
-  onAnalyzeCurrentSample: () => void;
-  activeSample: 'fire_smoke' | 'neutral' | 'custom';
-  isSampleAnalyzed: boolean;
-
   // Video / Camera actions
-  onLoadSampleVideo?: () => void;
   onStartCamera?: () => void;
   onStopCamera?: () => void;
   cameraDevices?: MediaDeviceInfo[];
@@ -70,11 +61,6 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
   alerts = [],
   onSelectImageFile,
   onSelectVideoFile,
-  onSelectSample,
-  onAnalyzeCurrentSample,
-  activeSample,
-  isSampleAnalyzed,
-  onLoadSampleVideo,
   onStartCamera,
   onStopCamera,
   cameraDevices,
@@ -172,7 +158,7 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
       if (analysisState === 'idle' && detections.length === 0) {
         return (
           <p className="editorial-status-idle">
-            Chọn ảnh hoặc chạy mẫu để xem kết quả.
+            Chọn hoặc kéo thả ảnh để bắt đầu nhận diện.
           </p>
         );
       }
@@ -263,7 +249,7 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
 
     return (
       <p className="editorial-status-idle">
-        Chọn ảnh hoặc chạy mẫu để xem kết quả.
+        Chọn hoặc kéo thả ảnh để bắt đầu nhận diện.
       </p>
     );
   };
@@ -375,111 +361,11 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
       <div className="editorial-divider-line" />
 
       {/* =========================================================================
-          SECTION 2: MẪU THỬ (Sample Trials)
+          SECTION 2: THÔNG SỐ CAMERA
          ========================================================================= */}
-      <section className="editorial-section">
-        {sourceType === 'image' && (
-          <>
-            <h2 className="editorial-section-title">Mẫu thử</h2>
-            <div className="editorial-thumbnail-grid">
-              {/* Thumbnail 1: Có lửa hoặc khói */}
-              <button
-                type="button"
-                className={`editorial-thumb-card ${activeSample === 'fire_smoke' ? 'active' : ''}`}
-                onClick={() => onSelectSample('fire_smoke')}
-                title="Bấm để nạp và tự động nhận diện ảnh khói cháy rừng"
-              >
-                <div className="editorial-thumb-img-wrap">
-                  <img
-                    src="/samples/sample_fire_smoke.jpg"
-                    alt="Mẫu có khói và lửa rừng"
-                    className="editorial-thumb-img"
-                  />
-                </div>
-                <span className="editorial-thumb-caption">Có lửa hoặc khói</span>
-              </button>
-
-              {/* Thumbnail 2: Cảnh bình thường */}
-              <button
-                type="button"
-                className={`editorial-thumb-card ${activeSample === 'neutral' ? 'active' : ''}`}
-                onClick={() => onSelectSample('neutral')}
-                title="Bấm để nạp và tự động nhận diện ảnh rừng bình thường"
-              >
-                <div className="editorial-thumb-img-wrap">
-                  <img
-                    src="/samples/sample_neutral.jpg"
-                    alt="Mẫu cảnh rừng bình thường"
-                    className="editorial-thumb-img"
-                  />
-                </div>
-                <span className="editorial-thumb-caption">Cảnh bình thường</span>
-              </button>
-            </div>
-
-            {/* Nút Phân tích / Phân tích lại ảnh mẫu */}
-            <button
-              type="button"
-              className="editorial-outline-btn"
-              onClick={onAnalyzeCurrentSample}
-              disabled={analysisState === 'analyzing'}
-              title="Phân tích hoặc phân tích lại ảnh hiện tại với model và ngưỡng mới"
-            >
-              {analysisState === 'analyzing' ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" />
-                  <span>Đang phân tích...</span>
-                </>
-              ) : isSampleAnalyzed ? (
-                <>
-                  <RotateCcw size={15} />
-                  <span>Phân tích lại ảnh mẫu</span>
-                </>
-              ) : (
-                'Phân tích ảnh mẫu'
-              )}
-            </button>
-          </>
-        )}
-
-        {sourceType === 'video' && (
-          <>
-            <h2 className="editorial-section-title">Mẫu thử</h2>
-            <div className="editorial-thumbnail-grid single">
-              <button
-                type="button"
-                className="editorial-thumb-card active"
-                onClick={onLoadSampleVideo}
-                title="Bấm để nạp video khói lửa thử nghiệm"
-              >
-                <div className="editorial-thumb-img-wrap video-wrap">
-                  <img
-                    src="/samples/sample_fire_smoke.jpg"
-                    alt="Video mẫu"
-                    className="editorial-thumb-img"
-                  />
-                  <div className="video-thumb-overlay">
-                    <Play size={20} className="fill-white text-white" />
-                  </div>
-                </div>
-                <span className="editorial-thumb-caption">Video mẫu khói cháy rừng</span>
-              </button>
-            </div>
-            {onLoadSampleVideo && (
-              <button
-                type="button"
-                className="editorial-outline-btn"
-                onClick={onLoadSampleVideo}
-                title="Nạp video mẫu để kiểm tra nhận diện"
-              >
-                Nạp video mẫu
-              </button>
-            )}
-          </>
-        )}
-
-        {sourceType === 'camera' && (
-          <>
+      {sourceType === 'camera' && (
+        <>
+          <section className="editorial-section">
             <h2 className="editorial-section-title">Thông số camera</h2>
             <div className="editorial-camera-meta">
               <div className="meta-row">
@@ -497,11 +383,11 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
                 <span className="meta-value">{inferenceMs.toFixed(0)} ms</span>
               </div>
             </div>
-          </>
-        )}
-      </section>
+          </section>
 
-      <div className="editorial-divider-line" />
+          <div className="editorial-divider-line" />
+        </>
+      )}
 
       {/* =========================================================================
           SECTION 3: KẾT QUẢ (Dynamic Results per Tab & State)
