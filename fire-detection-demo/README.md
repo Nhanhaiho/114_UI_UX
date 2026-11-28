@@ -21,7 +21,24 @@ Dành cho bạn/thành viên mới khi clone hoặc copy dự án về máy: hã
 
 ---
 
-## 🚀 HƯỚNG DẪN CÀI ĐẶT & CHẠY DỰ ÁN TỪNG BƯỚC
+## 🐳 CHẠY NHANH BẰNG DOCKER COMPOSE
+
+Tại thư mục `fire-detection-demo/`:
+
+- **Mặc định CPU** (Nginx ở `http://localhost:8080`, backend ở `8000`, mount `backend/weights/` `:ro`):
+  ```powershell
+  docker compose --env-file frontend/.env up -d --build
+  ```
+- **Bật NVIDIA GPU** (`compose.gpu.yaml` dùng PyTorch CUDA 12.6 `cu126`, `DEVICE=cuda:0`):
+  ```powershell
+  docker compose --env-file frontend/.env -f compose.yaml -f compose.gpu.yaml up -d --build
+  ```
+- **Kiểm tra checkpoint & thiết bị**: `Invoke-RestMethod http://localhost:8080/api/model/status`
+- **Dừng container**: `docker compose down` (hoặc `docker compose -f compose.yaml -f compose.gpu.yaml down`)
+
+---
+
+## 🚀 HƯỚNG DẪN CÀI ĐẶT & CHẠY TRỰC TIẾP TỪNG BƯỚC (KHÔNG DOCKER)
 
 Dự án gồm 2 phần độc lập:
 1. **Backend** (FastAPI chạy mô hình Python trên cổng `8000`).
